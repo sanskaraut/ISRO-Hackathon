@@ -12,21 +12,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libhdf5-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first (Docker layer caching)
+# Install Python dependencies (CPU-only torch)
 COPY requirements.txt .
-
-# Install Python dependencies (no PyTorch — model runs on HF Spaces)
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.txt \
+    --extra-index-url https://download.pytorch.org/whl/cpu
 
 # Copy application source
 COPY . .
 
-# Create required runtime directories
-RUN mkdir -p datasets ingest cache data
+# Create model weight directory placeholder
+RUN mkdir -p models
 
-# Expose FastAPI port
-EXPOSE 8000
+# Expose Hugging Face Spaces default port
+EXPOSE 7860
 
-# Start the application
-CMD ["python", "app.py"]
+# Start microservice
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "7860"]

@@ -20,7 +20,6 @@ logging.basicConfig(
 logger = logging.getLogger("app")
 
 import config
-from services.model_loader import load_model_and_warmup
 from services.dataset_scanner import scan_and_generate_metadata
 from routes import health, dataset, inference
 
@@ -40,19 +39,18 @@ async def lifespan(app: FastAPI):
         if not path.exists():
             logger.info(f"[STARTUP] Directory for {name} does not exist. Creating: {path}")
             path.mkdir(parents=True, exist_ok=True)
-            
-    # Verify PyTorch model path
-    if not config.MODEL_PATH.exists():
-        logger.error(f"[CRITICAL] PyTorch model weights missing at: {config.MODEL_PATH}")
-        logger.error("Please place best_model_512.pth in models/ folder before running.")
-        sys.exit(1)
-        
-    # 1. Load model checkpoint once on startup and keep resident in-memory
-    load_model_and_warmup()
-    
-    # 2. Ingest original NetCDF imagery and build simulated multi-temporal database
+
+    # Check HF_SPACES_URL is configured
+    import os
+    hf_url = os.getenv("HF_SPACES_URL", "")
+    if not hf_url:
+        logger.warning("[STARTUP] HF_SPACES_URL is not set. Inference calls will fail.")
+    else:
+        logger.info(f"[STARTUP] HF Spaces inference endpoint: {hf_url}")
+
+    # Ingest original NetCDF imagery and build simulated multi-temporal database (optional)
     # scan_and_generate_metadata()
-    
+
     logger.info("======================================================")
     logger.info(f"[GATEWAY] API IS READY FOR FRONTEND REQUESTS ON {config.HOST}:{config.PORT}")
     logger.info("======================================================")

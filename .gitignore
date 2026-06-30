@@ -39,3 +39,5 @@ yarn-error.log*
 .pnpm-debug.log*
 .env*
 .vercel
+ISRO_Hackathon_Model
+ISRO_Hackathon_Model/

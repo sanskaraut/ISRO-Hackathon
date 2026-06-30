@@ -1,0 +1,15 @@
+# FastAPI microservice
+fastapi==0.118.0
+uvicorn[standard]==0.37.0
+
+# PyTorch (CPU-only; Hugging Face Spaces provides GPU via ZeroGPU if needed)
+torch==2.8.0
+pytorch-msssim==1.0.0
+
+# Scientific data
+xarray==2025.6.1
+netCDF4==1.7.2
+numpy==2.3.4
+
+# Form uploads
+python-multipart==0.0.20

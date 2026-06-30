@@ -1,0 +1,6 @@
+# HF Spaces ignores .env — configure these via the HF Space "Secrets" page:
+# DEVICE = cpu
+# MODEL_PATH = models/best_model_512.pth
+# PATCH_SIZE = 512
+# OVERLAP = 64
+# BATCH_SIZE = 8

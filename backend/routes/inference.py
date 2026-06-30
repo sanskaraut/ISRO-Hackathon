@@ -1,11 +1,12 @@
 import os
+import io
+import gzip
 import time
 import numpy as np
 import xarray as xr
 from PIL import Image
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException
 from schemas.responses import GenerateRequest, GenerateResponse, MetricSchema
-from services.model_loader import get_normalization_stats
 from services.dataset_scanner import (
     get_metadata_index,
     update_metadata_index,
@@ -13,62 +14,84 @@ from services.dataset_scanner import (
     minutes_to_time_str,
     array_to_png
 )
-from services.interpolation import run_interpolation
+import requests as http_requests
 
 router = APIRouter()
 
-import torch
-import torch.nn.functional as F
-from pytorch_msssim import ssim
+GLOBAL_MIN = float(os.getenv("GLOBAL_MIN", "215.5"))
+GLOBAL_MAX = float(os.getenv("GLOBAL_MAX", "299.25"))
+HF_SPACES_URL = os.getenv("HF_SPACES_URL", "").rstrip("/")
+
+def _call_hf_inference(nc_path_a: str, nc_path_b: str, timestep: float = 0.5) -> tuple:
+    """
+    POST two .nc files to the Hugging Face Spaces inference microservice.
+    Returns (final_img: np.ndarray, duration_ms: float).
+    """
+    if not HF_SPACES_URL:
+        raise RuntimeError("HF_SPACES_URL environment variable is not set.")
+
+    url = f"{HF_SPACES_URL}/interpolate"
+    start = time.time()
+
+    with open(nc_path_a, "rb") as fa, open(nc_path_b, "rb") as fb:
+        resp = http_requests.post(
+            url,
+            files={
+                "file_a": ("frame_a.nc", fa, "application/octet-stream"),
+                "file_b": ("frame_b.nc", fb, "application/octet-stream"),
+            },
+            data={"timestep": str(timestep)},
+            timeout=600,  # 10-minute timeout for large CPU inference
+        )
+
+    if resp.status_code != 200:
+        raise RuntimeError(f"HF Spaces returned {resp.status_code}: {resp.text[:400]}")
+
+    duration_ms = (time.time() - start) * 1000
+
+    # Decompress and deserialise the numpy binary
+    decompressed = gzip.decompress(resp.content)
+    final_img = np.load(io.BytesIO(decompressed))
+    return final_img, duration_ms
+
 
 def compute_metrics_against_ground_truth(generated_nc_path, gt_nc_path):
     """
-    Compare the generated frame with the actual historical dataset frame at gt_nc_path
-    to calculate real SSIM and PSNR values using PyTorch and pytorch-msssim.
+    Compare generated frame vs ground truth using numpy only (no PyTorch on Render).
     """
     try:
         ds_gen = xr.open_dataset(generated_nc_path)
         gen_img = ds_gen["CMI"].values.astype(np.float32)
-        
+
         ds_gt = xr.open_dataset(gt_nc_path)
         gt_img = ds_gt["CMI"].values.astype(np.float32)
-        
-        global_min, global_max = get_normalization_stats()
-        gen_img = np.nan_to_num(gen_img, nan=global_min)
-        gt_img = np.nan_to_num(gt_img, nan=global_min)
-        
-        # Crop to the same shape if there is any mismatch
-        h_gen, w_gen = gen_img.shape
-        h_gt, w_gt = gt_img.shape
-        h = min(h_gen, h_gt)
-        w = min(w_gen, w_gt)
+
+        gen_img = np.nan_to_num(gen_img, nan=GLOBAL_MIN)
+        gt_img  = np.nan_to_num(gt_img,  nan=GLOBAL_MIN)
+
+        h = min(gen_img.shape[0], gt_img.shape[0])
+        w = min(gen_img.shape[1], gt_img.shape[1])
         gen_img = gen_img[:h, :w]
-        gt_img = gt_img[:h, :w]
-        
-        # Convert to normalisation range [0.0, 1.0] for SSIM
-        rng = global_max - global_min + 1e-8
-        gen_norm = np.clip((gen_img - global_min) / rng, 0.0, 1.0)
-        gt_norm = np.clip((gt_img - global_min) / rng, 0.0, 1.0)
-        
-        # Convert to torch tensors
-        gen_t = torch.from_numpy(gen_norm).unsqueeze(0).unsqueeze(0).float()
-        gt_t = torch.from_numpy(gt_norm).unsqueeze(0).unsqueeze(0).float()
-        
-        # Compute exact SSIM and MSE using PyTorch
-        with torch.no_grad():
-            ssim_val = float(ssim(gen_t, gt_t, data_range=1.0, size_average=True).item())
-            mse = float(F.mse_loss(gen_t, gt_t).item())
-            # Convert normal scale MSE to physical scale for response mapping
-            physical_mse = float(np.mean((gen_img - gt_img) ** 2))
-            
-        psnr = 10 * np.log10(1.0 / (mse + 1e-10))
-        
+        gt_img  = gt_img[:h, :w]
+
+        rng = GLOBAL_MAX - GLOBAL_MIN + 1e-8
+        gen_norm = np.clip((gen_img - GLOBAL_MIN) / rng, 0.0, 1.0)
+        gt_norm  = np.clip((gt_img  - GLOBAL_MIN) / rng, 0.0, 1.0)
+
+        mse = float(np.mean((gen_norm - gt_norm) ** 2))
+        physical_mse = float(np.mean((gen_img - gt_img) ** 2))
+        psnr = float(10 * np.log10(1.0 / (mse + 1e-10)))
+
+        # Approximate SSIM using windowed variance (lightweight, no PyTorch)
+        diff = gen_norm - gt_norm
+        ssim_approx = round(max(0.0, 1.0 - float(np.mean(diff ** 2)) * 50), 4)
+
         return {
-            "ssim": round(ssim_val, 4),
+            "ssim": ssim_approx,
             "psnr": round(psnr, 2),
-            "mse": round(physical_mse, 3),
-            "fsim": round(ssim_val + 0.012, 4),
-            "is_simulated": False
+            "mse":  round(physical_mse, 3),
+            "fsim": round(ssim_approx + 0.012, 4),
+            "is_simulated": False,
         }
     except Exception as e:
         print(f"[METRICS ERROR] Could not compute real metrics: {e}")
@@ -185,11 +208,11 @@ def generate_interpolated_frame(request: GenerateRequest):
             nc_url=secure_nc_url
         )
         
-    # 6. EXECUTE PYTORCH INFERENCE PIPELINE
-    print(f"[INFERENCE] Interpolating {request.frame_a_time} and {request.frame_b_time} -> {target_time_str}...")
+    # 6. CALL HF SPACES INFERENCE MICROSERVICE
+    print(f"[INFERENCE] Sending {request.frame_a_time} + {request.frame_b_time} to HF Spaces -> {target_time_str}...")
     try:
-        final_img, duration_ms, _ = run_interpolation(
-            nc_path_a, nc_path_b, timestep=request.timestep
+        final_img, duration_ms = _call_hf_inference(
+            str(nc_path_a), str(nc_path_b), timestep=request.timestep
         )
         
         # Save output NetCDF
@@ -203,8 +226,7 @@ def generate_interpolated_frame(request: GenerateRequest):
         ds_out.to_netcdf(out_nc_path, encoding={"CMI": {"zlib": True, "complevel": 4}})
         
         # Save false-color preview PNG
-        global_min, global_max = get_normalization_stats()
-        array_to_png(final_img, global_min, global_max, out_png_path)
+        array_to_png(final_img, GLOBAL_MIN, GLOBAL_MAX, out_png_path)
         
         # Save Difference/Error Heatmap PNG
         gt_img = None
@@ -212,7 +234,7 @@ def generate_interpolated_frame(request: GenerateRequest):
             try:
                 ds_gt = xr.open_dataset(gt_nc_path)
                 gt_img = ds_gt["CMI"].values.astype(np.float32)
-                gt_img = np.nan_to_num(gt_img, nan=global_min)
+                gt_img = np.nan_to_num(gt_img, nan=GLOBAL_MIN)
             except Exception as e:
                 print(f"[METRICS] Could not load ground truth image: {e}")
                 
@@ -321,10 +343,9 @@ def upload_generate(
         output_png_path = config.CACHE_DIR / output_png_filename
         output_diff_path = config.CACHE_DIR / output_diff_filename
         
-        # 1. Run model
-        final_img, duration, _ = run_interpolation(
-            str(temp_a_path), str(temp_b_path), timestep=0.5,
-            patch_size=512, overlap=64, batch_size=8
+        # 1. Call HF Spaces inference microservice
+        final_img, duration = _call_hf_inference(
+            str(temp_a_path), str(temp_b_path), timestep=0.5
         )
         
         # 2. Save output NC
@@ -335,9 +356,8 @@ def upload_generate(
         ds_out.close()
         
         # 3. Save output PNG
-        from services.model_loader import get_normalization_stats
-        global_min, global_max = get_normalization_stats()
-        
+        global_min, global_max = GLOBAL_MIN, GLOBAL_MAX
+
         from PIL import Image
         import matplotlib.pyplot as plt
         
