@@ -1,33 +1,35 @@
 FROM python:3.11-slim
 
-# Set system-level environment flags
+# Python settings
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
+# Working directory inside container
 WORKDIR /app
 
-# Install system dependencies required for NetCDF4 and HDF5 C-bindings
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libnetcdf-dev \
     libhdf5-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements file first to optimize layer caching
-COPY backend/requirements.txt .
+# Copy requirements first (for Docker layer caching)
+COPY requirements.txt .
 
-# Install dependencies, forcing CPU-only torch to minimize container footprint
+# Install Python dependencies (CPU-only PyTorch)
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt --extra-index-url https://download.pytorch.org/whl/cpu
+    pip install --no-cache-dir -r requirements.txt \
+    --extra-index-url https://download.pytorch.org/whl/cpu
 
-# Copy the backend source files
-COPY backend ./backend
+# Copy the entire backend source
+COPY . .
 
-# Default directory allocations
-RUN mkdir -p backend/datasets backend/ingest backend/cache backend/data backend/models
+# Create required directories
+RUN mkdir -p datasets ingest cache data models
 
-# Expose backend API gateway port
+# Expose FastAPI port
 EXPOSE 8000
 
-# Start FastAPI gateway using Python
-CMD ["python", "backend/app.py"]
+# Start the application
+CMD ["python", "app.py"]
