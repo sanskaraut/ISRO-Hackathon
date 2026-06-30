@@ -439,6 +439,17 @@ def scan_and_generate_metadata():
 
 def get_metadata_index():
     global metadata_index
+    if not metadata_index:
+        if config.METADATA_PATH.exists():
+            try:
+                with open(config.METADATA_PATH, "r", encoding="utf-8") as f:
+                    metadata_index = json.load(f)
+                logging.getLogger("app").info("Loaded datasets index from existing metadata.json")
+            except Exception as e:
+                logging.getLogger("app").warning(f"Could not load metadata from disk: {e}")
+                metadata_index = {}
+        else:
+            metadata_index = {}
     return metadata_index
 
 def update_metadata_index(
