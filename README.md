@@ -1,36 +1,74 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Satellite Cyclone Intelligence System (CYC-INTEL)
 
-## Getting Started
+This repository hosts the Satellite Frame Interpolation system, comprising a Next.js web interface (frontend) and a FastAPI PyTorch inference service (backend).
 
-First, run the development server:
+For full step-by-step production setup, environment configurations, cloud deployment options, and telemetry ingestion instructions, please refer to the [Deployment Guide](file:///d:/Programming/GitHub/ISRO%20Hackathon/deployment.md).
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+---
+
+## 1. Project Directory Layout
+
+The project is organized as follows:
+
+```text
+├── backend/                  # FastAPI Python application (PyTorch model)
+│   ├── app.py                # Backend entry point
+│   ├── config.py             # Centralized environment-aware configuration
+│   ├── routes/               # API endpoints (inference, datasets, health)
+│   ├── services/             # Core logic (model loader, dataset scanner)
+│   └── cache/                # Interpolated frame caches
+├── frontend/                 # Next.js web application
+│   ├── app/                  # App router pages & layouts
+│   ├── components/           # UI and map components
+│   └── package.json          # Frontend configuration
+├── datasets/                 # Local NetCDF/PNG cyclone datasets (GOES19)
+├── ingest/                   # Ingest drops folder for raw NetCDF observations
+├── models/                   # Neural network weights directory
+│   └── best_model_512.pth    # PyTorch model weights
+├── docker-compose.yml        # Orchestration compose configurations
+└── README.md                 # This file
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 2. Getting Started
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Prerequisites
+1. **Python 3.11+**: For backend execution.
+2. **Node.js 18+**: For running the web application.
+3. **Docker & Compose (Optional)**: For containerized deployments.
 
-## Learn More
+### Local Run Commands
 
-To learn more about Next.js, take a look at the following resources:
+You can run both the frontend and backend servers concurrently from the root directory:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+# Run both frontend and backend concurrently
+npm run dev
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+# Run only backend
+npm run dev:backend
 
-## Deploy on Vercel
+# Run only frontend
+npm run dev:frontend
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+---
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 3. Docker Compose Orchestration
+
+To run containerized production services, simply run:
+```bash
+docker compose up --build -d
+```
+This builds and connects the frontend (port 3000) and backend (port 8000) services with volume persistence for datasets, model checkpoints, and caches.
+
+---
+
+## 4. API Endpoints
+
+- **Health Check**: `GET /health`
+- **List Datasets**: `GET /cyclones`
+- **Frame Ingestion/Discovery**: `GET /frame?satellite=...&cyclone_id=...&timestamp=...&type=raw|interpolated|difference&format=png|nc`
+- **Model Inference**: `POST /generate` (Interpolate frames between database anchors)
+- **Custom NetCDF Ingestion**: `POST /upload_generate` (Accepts two raw NetCDF uploads, performs interpolation, and generates discrepancy heatmaps)

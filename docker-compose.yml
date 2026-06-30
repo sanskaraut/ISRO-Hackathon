@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: cyc-intel-backend
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DATASETS_DIR=/app/backend/datasets
+      - INGEST_DIR=/app/backend/ingest
+      - CACHE_DIR=/app/backend/cache
+      - METADATA_PATH=/app/backend/data/metadata.json
+      - MODEL_PATH=/app/backend/models/best_model_512.pth
+      - DEVICE=cpu
+      - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8000,http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:3000
+    volumes:
+      # Bind mount host folders for persistent data sync and weights sharing
+      - ./backend/datasets:/app/backend/datasets
+      - ./backend/ingest:/app/backend/ingest
+      - ./backend/models:/app/backend/models
+      - ./backend/cache:/app/backend/cache
+      - ./backend/data:/app/backend/data
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=http://localhost:8000
+    container_name: cyc-intel-frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend

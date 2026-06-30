@@ -1,0 +1,34 @@
+# Ignore local Python environments and caches
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Ignore Next.js node modules and build outputs
+node_modules/
+.next/
+out/
+build/
+.env.local
+.env.production
+.env.development
+
+# Ignore large telemetry data layers, caches, and weight files
+datasets/
+ingest/
+models/
+backend/cache/
+backend/data/metadata.json
+
+# Ignore IDE configs and local logs
+.git/
+.gitignore
+.agents/
+.gemini/
+.vscode/
+.idea/
+*.log
+*.md

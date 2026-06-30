@@ -1,0 +1,150 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #030712;
+  --color-foreground: #f3f4f6;
+  
+  --color-space-navy-950: #030712;
+  --color-space-navy-900: #080f1e;
+  --color-space-navy-850: #0f1a30;
+  --color-space-navy-800: #172545;
+  --color-space-navy-700: #253966;
+  --color-space-navy-600: #3b538c;
+  
+  --color-electric-blue: #3a86ff;
+  --color-cyan-accent: #00f5d4;
+  --color-success-emerald: #10b981;
+  
+  --font-heading: var(--font-space-grotesk), sans-serif;
+  --font-sans: var(--font-inter), sans-serif;
+  --font-mono: "JetBrains Mono", Courier, monospace;
+  
+  --animate-pulse-slow: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  --animate-scanline: scanline 8s linear infinite;
+  --animate-float: float 6s ease-in-out infinite;
+}
+
+@keyframes scanline {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-10px) rotate(1deg);
+  }
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background-color: #030712;
+  color: #f3f4f6;
+  font-family: var(--font-inter), sans-serif;
+  overflow-x: hidden;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #030712;
+}
+::-webkit-scrollbar-thumb {
+  background: #172545;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a86ff;
+}
+
+/* Glassmorphism Panel styles */
+.glass-panel {
+  background: rgba(8, 15, 30, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(58, 134, 255, 0.15);
+}
+
+.glass-panel-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-panel-hover:hover {
+  background: rgba(8, 15, 30, 0.85);
+  border-color: rgba(0, 245, 212, 0.3);
+  box-shadow: 0 0 25px rgba(0, 245, 212, 0.08);
+  transform: translateY(-2px);
+}
+
+/* Telemetry Grid Pattern */
+.bg-grid-pattern {
+  background-size: 50px 50px;
+  background-image: 
+    linear-gradient(to right, rgba(58, 134, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(58, 134, 255, 0.04) 1px, transparent 1px);
+}
+
+/* Subtle Sci-Fi Scanline Effect */
+.scanlines::after {
+  content: " ";
+  display: block;
+  position: absolute;
+  top: 0; left: 0; bottom: 0; right: 0;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+  z-index: 2;
+  background-size: 100% 4px, 6px 100%;
+  pointer-events: none;
+}
+
+/* Sci-fi indicator glows */
+.glow-dot-blue {
+  box-shadow: 0 0 8px #3a86ff, 0 0 15px #3a86ff;
+}
+
+.glow-dot-cyan {
+  box-shadow: 0 0 8px #00f5d4, 0 0 15px #00f5d4;
+}
+
+.glow-dot-emerald {
+  box-shadow: 0 0 8px #10b981, 0 0 15px #10b981;
+}
+
+.glow-text-cyan {
+  text-shadow: 0 0 8px rgba(0, 245, 212, 0.4);
+}
+
+/* Tech corners decoration */
+.tech-corners {
+  position: relative;
+}
+.tech-corners::before, .tech-corners::after {
+  content: "";
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-color: rgba(0, 245, 212, 0.5);
+  border-style: solid;
+  pointer-events: none;
+}
+.tech-corners::before {
+  top: 0;
+  left: 0;
+  border-width: 1px 0 0 1px;
+}
+.tech-corners::after {
+  bottom: 0;
+  right: 0;
+  border-width: 0 1px 1px 0;
+}
