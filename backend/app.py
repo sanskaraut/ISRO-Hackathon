@@ -51,7 +51,7 @@ async def lifespan(app: FastAPI):
     load_model_and_warmup()
     
     # 2. Ingest original NetCDF imagery and build simulated multi-temporal database
-    scan_and_generate_metadata()
+    # scan_and_generate_metadata()
     
     logger.info("======================================================")
     logger.info(f"[GATEWAY] API IS READY FOR FRONTEND REQUESTS ON {config.HOST}:{config.PORT}")
