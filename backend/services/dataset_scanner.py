@@ -8,7 +8,6 @@ from pathlib import Path
 import numpy as np
 import xarray as xr
 from PIL import Image
-from services.model_loader import get_normalization_stats
 import config
 
 # In-memory metadata index cache
@@ -173,9 +172,8 @@ def ingest_raw_files():
     logger.info("==================================================")
     
     try:
-        global_min, global_max = get_normalization_stats()
-        if global_min is None or global_max is None:
-            global_min, global_max = 215.5, 299.25
+        global_min = float(os.getenv("GLOBAL_MIN", "215.5"))
+        global_max = float(os.getenv("GLOBAL_MAX", "299.25"))
     except Exception:
         global_min, global_max = 215.5, 299.25
         
@@ -258,11 +256,10 @@ def scan_and_generate_metadata():
         except Exception as e:
             logger.warning(f"Could not load existing metadata.json: {e}")
             
-    # Load normalization stats for preview generation
+    # Load normalization stats for preview generation (from env or defaults)
     try:
-        global_min, global_max = get_normalization_stats()
-        if global_min is None or global_max is None:
-            global_min, global_max = 215.5, 299.25
+        global_min = float(os.getenv("GLOBAL_MIN", "215.5"))
+        global_max = float(os.getenv("GLOBAL_MAX", "299.25"))
     except Exception:
         global_min, global_max = 215.5, 299.25
 
