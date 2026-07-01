@@ -136,3 +136,45 @@ def get_frame(
         
     media_type = "image/png" if format == "png" else "application/x-netcdf"
     return FileResponse(str(full_path), media_type=media_type)
+
+
+@router.post("/clear_cache")
+def clear_cache():
+    """
+    Deletes all generated cache files (NetCDFs, previews, heatmaps) and rebuilds a clean metadata index.
+    """
+    import shutil
+    import logging
+    import config
+    from services.dataset_scanner import scan_and_generate_metadata
+    from routes.inference import RUNNING_TASKS
+    
+    logger = logging.getLogger("app")
+    logger.info("[CLEAR CACHE] Initiating database cache wipe...")
+    
+    # 1. Clear running inference task registry
+    RUNNING_TASKS.clear()
+    
+    # 2. Delete all cached NetCDF and preview PNG files
+    if config.CACHE_DIR.exists():
+        try:
+            for item in config.CACHE_DIR.iterdir():
+                if item.is_file():
+                    item.unlink()
+                elif item.is_dir():
+                    shutil.rmtree(item)
+            logger.info("[CLEAR CACHE] Cache folder wiped successfully.")
+        except Exception as e:
+            logger.error(f"[CLEAR CACHE] Error wiping cache directory: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to wipe cache directory: {e}")
+            
+    # 3. Re-scan raw datasets to build clean metadata.json index
+    try:
+        scan_and_generate_metadata()
+        logger.info("[CLEAR CACHE] Metadata index rebuilt successfully.")
+    except Exception as e:
+        logger.error(f"[CLEAR CACHE] Error scanning raw datasets: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to rebuild metadata: {e}")
+        
+    return {"success": True, "message": "All generated caches and index registries cleared successfully."}
+
