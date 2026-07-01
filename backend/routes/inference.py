@@ -170,7 +170,10 @@ def run_background_inference(
                 var = f_nc.createVariable("CMI", "f4", ("y", "x"))
                 var[:] = final_img
             
-        # Downsample for false-color preview PNG (max 1024px to save memory)
+        # Generate full-resolution false-color preview PNG (chunked internally to save memory)
+        array_to_png(final_img, GLOBAL_MIN, GLOBAL_MAX, out_png_path)
+        
+        # Keep downsampled version for the difference map (only 3MB in RAM)
         h, w = final_img.shape
         factor = max(1, min(h, w) // 1024)
         final_down = final_img[::factor, ::factor]
@@ -179,8 +182,6 @@ def run_background_inference(
         del final_img
         import gc
         gc.collect()
-        
-        array_to_png(final_down, GLOBAL_MIN, GLOBAL_MAX, out_png_path)
         
         # Save Difference/Error Heatmap PNG (downsampled sliced reading from disk to save memory)
         gt_down = None

@@ -88,23 +88,36 @@ def parse_filename_to_timestamp(filename: str) -> str:
 def array_to_png(array, global_min, global_max, output_path):
     """
     Convert a 2D float32 CMI array into a false-color satellite IR preview PNG.
+    Processes in chunks of 512 rows to prevent memory crashes on large grids (5424x5424).
     """
-    rng = global_max - global_min + 1e-8
-    norm = np.clip((array - global_min) / rng, 0.0, 1.0)
-    inverted = 1.0 - norm
-    gray = (inverted * 255).astype(np.uint8)
-    
     h, w = array.shape
-    rgb = np.zeros((h, w, 3), dtype=np.uint8)
+    img = Image.new("RGB", (w, h))
     
-    # R channel: high cloud tops
-    rgb[..., 0] = np.where(gray > 165, np.clip((gray - 165) * 2.8, 0, 255), 12).astype(np.uint8)
-    # G channel: active for cyan cloud walls and white cores
-    rgb[..., 1] = np.where(gray > 110, np.clip((gray - 110) * 1.8, 0, 255), 22).astype(np.uint8)
-    # B channel: active for all clouds, creating a blue base
-    rgb[..., 2] = np.clip(gray * 1.1 + 40, 0, 255).astype(np.uint8)
+    rng = global_max - global_min + 1e-8
+    chunk_size = 512
     
-    img = Image.fromarray(rgb)
+    for y_start in range(0, h, chunk_size):
+        y_end = min(y_start + chunk_size, h)
+        chunk = array[y_start:y_end, :]
+        
+        # Calculate false-color mappings in-place to keep memory minimal
+        norm = np.clip((chunk - global_min) / rng, 0.0, 1.0)
+        inverted = 1.0 - norm
+        gray = (inverted * 255).astype(np.uint8)
+        
+        ch_h = y_end - y_start
+        rgb = np.zeros((ch_h, w, 3), dtype=np.uint8)
+        
+        rgb[..., 0] = np.where(gray > 165, np.clip((gray - 165) * 2.8, 0, 255), 12).astype(np.uint8)
+        rgb[..., 1] = np.where(gray > 110, np.clip((gray - 110) * 1.8, 0, 255), 22).astype(np.uint8)
+        rgb[..., 2] = np.clip(gray * 1.1 + 40, 0, 255).astype(np.uint8)
+        
+        chunk_img = Image.fromarray(rgb)
+        img.paste(chunk_img, (0, y_start))
+        
+        # Force garbage collection for the chunk memory
+        del chunk, norm, inverted, gray, rgb, chunk_img
+        
     img.save(output_path, "PNG")
 
 def parse_raw_satellite_filename(filename: str):
