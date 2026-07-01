@@ -21,10 +21,11 @@ origins_env = os.getenv("ALLOWED_ORIGINS")
 if origins_env:
     ALLOWED_ORIGINS = [o.strip() for o in origins_env.split(",") if o.strip()]
 else:
-    # Local fallback origins
+    # Fallback origins (set ALLOWED_ORIGINS env var in production instead)
     ALLOWED_ORIGINS = [
         "http://localhost:3000",
         "http://localhost:8000",
         "http://127.0.0.1:3000",
-        "http://127.0.0.1:8000"
+        "http://127.0.0.1:8000",
+        "https://isro-hackathon-lilac.vercel.app",
     ]
