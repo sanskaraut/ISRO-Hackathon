@@ -331,10 +331,6 @@ def scan_and_generate_metadata():
                 if cmi_shape[0] == 0 or cmi_shape[1] == 0:
                     ds.close()
                     raise ValueError(f"Empty dimensions: {cmi_shape}.")
-                
-                cmi_data = ds["CMI"].values.astype(np.float32)
-                ds.close()
-                
                 # Validation 4: Timestamp parseable from filename
                 timestamp = parse_filename_to_timestamp(f)
                 
@@ -345,13 +341,19 @@ def scan_and_generate_metadata():
                 # Validation 5: Auto Preview PNG generation/reuse
                 if not png_filepath.exists():
                     try:
+                        cmi_data = ds["CMI"].values.astype(np.float32)
                         cmi_data = np.nan_to_num(cmi_data, nan=global_min)
                         array_to_png(cmi_data, global_min, global_max, str(png_filepath))
                         previews_created += 1
+                        del cmi_data
+                        import gc
+                        gc.collect()
                     except Exception as e:
                         logger.warning(f"Failed to generate preview for {nc_filepath}: {e}")
                 else:
                     previews_reused += 1
+
+                ds.close()
 
                 valid_frames_info.append({
                     "timestamp": timestamp,

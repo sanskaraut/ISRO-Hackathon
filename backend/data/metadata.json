@@ -34,100 +34,16 @@
         "08:20",
         "08:30"
       ],
-      "generated_frames": [
-        "07:42:30",
-        "07:45",
-        "07:50",
-        "08:20"
-      ],
+      "generated_frames": [],
       "ground_truth_availability": {
         "07:40": true,
         "07:50": true,
         "08:00": true,
         "08:10": true,
         "08:20": true,
-        "08:30": true,
-        "07:45": false,
-        "07:42:30": false
+        "08:30": true
       },
-      "generated_metadata": {
-        "07:45": {
-          "timestamp": "07:45",
-          "parent_timestamps": [
-            "07:40",
-            "07:50"
-          ],
-          "interpolation_depth": 1,
-          "temporal_resolution": "5 min",
-          "scientific_metrics": {
-            "ssim": 0.9452,
-            "psnr": 32.84,
-            "mse": 12.14,
-            "fsim": 0.9591,
-            "is_simulated": true
-          },
-          "inference_time": 53375.579833984375,
-          "ground_truth_availability": false,
-          "model_version": "best_model_512.pth"
-        },
-        "07:50": {
-          "timestamp": "07:50",
-          "parent_timestamps": [
-            "07:40",
-            "08:00"
-          ],
-          "interpolation_depth": 1,
-          "temporal_resolution": "10 min",
-          "scientific_metrics": {
-            "ssim": 0.6119,
-            "psnr": 24.11,
-            "mse": 62.446,
-            "fsim": 0.6239,
-            "is_simulated": false
-          },
-          "inference_time": 44736.87028884888,
-          "ground_truth_availability": true,
-          "model_version": "best_model_512.pth"
-        },
-        "08:20": {
-          "timestamp": "08:20",
-          "parent_timestamps": [
-            "08:10",
-            "08:30"
-          ],
-          "interpolation_depth": 1,
-          "temporal_resolution": "10 min",
-          "scientific_metrics": {
-            "ssim": 0.6125,
-            "psnr": 24.12,
-            "mse": 62.401,
-            "fsim": 0.6245,
-            "is_simulated": false
-          },
-          "inference_time": 46849.58839416504,
-          "ground_truth_availability": true,
-          "model_version": "best_model_512.pth"
-        },
-        "07:42:30": {
-          "timestamp": "07:42:30",
-          "parent_timestamps": [
-            "07:40",
-            "07:45"
-          ],
-          "interpolation_depth": 1,
-          "temporal_resolution": "2.5 min",
-          "scientific_metrics": {
-            "ssim": 0.9452,
-            "psnr": 32.84,
-            "mse": 12.14,
-            "fsim": 0.9591,
-            "is_simulated": true
-          },
-          "inference_time": 36837.31389045715,
-          "ground_truth_availability": false,
-          "model_version": "best_model_512.pth"
-        }
-      },
+      "generated_metadata": {},
       "frames": [
         {
           "timestamp": "07:40",
