@@ -138,7 +138,7 @@ def get_frame(
     return FileResponse(str(full_path), media_type=media_type)
 
 
-@router.post("/clear_cache")
+@router.get("/clear_cache")
 def clear_cache():
     """
     Deletes all generated cache files (NetCDFs, previews, heatmaps) and rebuilds a clean metadata index.
