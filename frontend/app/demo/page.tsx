@@ -408,11 +408,11 @@ export default function DemoPage() {
       const frameB = selectedFrames[1];
       return {
         frameA,
-        frameAUrl: getFrameUrl(frameA),
-        frameADownload: getFrameDownloadUrl(frameA),
+        frameAUrl: getFrameUrl(frameA, "raw"),
+        frameADownload: getFrameDownloadUrl(frameA, "raw"),
         frameB,
-        frameBUrl: getFrameUrl(frameB),
-        frameBDownload: getFrameDownloadUrl(frameB),
+        frameBUrl: getFrameUrl(frameB, "raw"),
+        frameBDownload: getFrameDownloadUrl(frameB, "raw"),
         middle: currentTime,
         middleUrl: getFrameUrl(currentTime, hasBoth ? centerViewMode : undefined),
         middleDownload: getFrameDownloadUrl(currentTime, hasBoth ? centerViewMode : undefined),
@@ -428,8 +428,8 @@ export default function DemoPage() {
       const frameA = selectedFrames[0];
       return {
         frameA,
-        frameAUrl: getFrameUrl(frameA),
-        frameADownload: getFrameDownloadUrl(frameA),
+        frameAUrl: getFrameUrl(frameA, "raw"),
+        frameADownload: getFrameDownloadUrl(frameA, "raw"),
         frameB: "",
         frameBUrl: null,
         frameBDownload: null,
@@ -451,11 +451,11 @@ export default function DemoPage() {
       const { parentA, parentB } = findParents(currentTime, sortedAll);
       return {
         frameA: parentA,
-        frameAUrl: parentA ? getFrameUrl(parentA) : null,
-        frameADownload: parentA ? getFrameDownloadUrl(parentA) : null,
+        frameAUrl: parentA ? getFrameUrl(parentA, "raw") : null,
+        frameADownload: parentA ? getFrameDownloadUrl(parentA, "raw") : null,
         frameB: parentB,
-        frameBUrl: parentB ? getFrameUrl(parentB) : null,
-        frameBDownload: parentB ? getFrameDownloadUrl(parentB) : null,
+        frameBUrl: parentB ? getFrameUrl(parentB, "raw") : null,
+        frameBDownload: parentB ? getFrameDownloadUrl(parentB, "raw") : null,
         middle: currentTime,
         middleUrl: getFrameUrl(currentTime, hasBoth ? centerViewMode : undefined),
         middleDownload: getFrameDownloadUrl(currentTime, hasBoth ? centerViewMode : undefined),
@@ -471,11 +471,11 @@ export default function DemoPage() {
 
     return {
       frameA: prevTimestamp || "",
-      frameAUrl: prevTimestamp ? getFrameUrl(prevTimestamp) : null,
-      frameADownload: prevTimestamp ? getFrameDownloadUrl(prevTimestamp) : null,
+      frameAUrl: prevTimestamp ? getFrameUrl(prevTimestamp, "raw") : null,
+      frameADownload: prevTimestamp ? getFrameDownloadUrl(prevTimestamp, "raw") : null,
       frameB: nextTimestamp || "",
-      frameBUrl: nextTimestamp ? getFrameUrl(nextTimestamp) : null,
-      frameBDownload: nextTimestamp ? getFrameDownloadUrl(nextTimestamp) : null,
+      frameBUrl: nextTimestamp ? getFrameUrl(nextTimestamp, "raw") : null,
+      frameBDownload: nextTimestamp ? getFrameDownloadUrl(nextTimestamp, "raw") : null,
       middle: currentTime,
       middleUrl: getFrameUrl(currentTime, hasBoth ? centerViewMode : undefined),
       middleDownload: getFrameDownloadUrl(currentTime, hasBoth ? centerViewMode : undefined),
