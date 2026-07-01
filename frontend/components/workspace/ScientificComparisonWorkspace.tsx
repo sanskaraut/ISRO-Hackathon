@@ -79,6 +79,7 @@ export default function ScientificComparisonWorkspace({
   // Playback Animation States
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [playbackSpeed, setPlaybackSpeed] = useState<0.5 | 1 | 2>(1);
+  const [playbackSequence, setPlaybackSequence] = useState<"raw" | "all">("all");
 
   const isFrameGenerated = React.useMemo(() => {
     return generatedTimestamps.includes(timestamp) || !!(cyclone?.generated_frames && cyclone.generated_frames.includes(timestamp));
@@ -111,6 +112,20 @@ export default function ScientificComparisonWorkspace({
     return Array.from(new Set([...rawTimestamps, ...generatedTimestamps]))
       .sort((a, b) => timeStrToMinutes(a) - timeStrToMinutes(b));
   }, [rawTimestamps, generatedTimestamps]);
+
+  // The active timeline array used for playback navigation and loop
+  const activeTimeline = React.useMemo(() => {
+    if (playbackSequence === "raw") {
+      const timeStrToMinutes = (tStr: string) => {
+        const parts = tStr.split(":");
+        return parts.length === 2 
+          ? parseInt(parts[0]) * 60 + parseInt(parts[1])
+          : parseInt(parts[0]) * 60 + parseInt(parts[1]) + parseInt(parts[2]) / 60;
+      };
+      return [...rawTimestamps].sort((a, b) => timeStrToMinutes(a) - timeStrToMinutes(b));
+    }
+    return sortedTimeline;
+  }, [playbackSequence, rawTimestamps, sortedTimeline]);
 
   // Sync submode if ground truth vanishes
   useEffect(() => {
@@ -174,31 +189,31 @@ export default function ScientificComparisonWorkspace({
     const delay = 1000 / playbackSpeed;
     const intervalId = setInterval(() => {
       const latestTime = currentTimeRef.current;
-      const currIndex = sortedTimeline.indexOf(latestTime);
-      if (currIndex === -1 || currIndex === sortedTimeline.length - 1) {
-        setCurrentTime(sortedTimeline[0]);
+      const currIndex = activeTimeline.indexOf(latestTime);
+      if (currIndex === -1 || currIndex === activeTimeline.length - 1) {
+        setCurrentTime(activeTimeline[0]);
       } else {
-        setCurrentTime(sortedTimeline[currIndex + 1]);
+        setCurrentTime(activeTimeline[currIndex + 1]);
       }
     }, delay);
     return () => clearInterval(intervalId);
-  }, [isPlaying, playbackSpeed, sortedTimeline, setCurrentTime]);
+  }, [isPlaying, playbackSpeed, activeTimeline, setCurrentTime]);
 
   const handlePrevFrame = () => {
-    const currIndex = sortedTimeline.indexOf(currentTime);
+    const currIndex = activeTimeline.indexOf(currentTime);
     if (currIndex > 0) {
-      setCurrentTime(sortedTimeline[currIndex - 1]);
+      setCurrentTime(activeTimeline[currIndex - 1]);
     } else {
-      setCurrentTime(sortedTimeline[sortedTimeline.length - 1]);
+      setCurrentTime(activeTimeline[activeTimeline.length - 1]);
     }
   };
 
   const handleNextFrame = () => {
-    const currIndex = sortedTimeline.indexOf(currentTime);
-    if (currIndex !== -1 && currIndex < sortedTimeline.length - 1) {
-      setCurrentTime(sortedTimeline[currIndex + 1]);
+    const currIndex = activeTimeline.indexOf(currentTime);
+    if (currIndex !== -1 && currIndex < activeTimeline.length - 1) {
+      setCurrentTime(activeTimeline[currIndex + 1]);
     } else {
-      setCurrentTime(sortedTimeline[0]);
+      setCurrentTime(activeTimeline[0]);
     }
   };
 
@@ -684,7 +699,7 @@ export default function ScientificComparisonWorkspace({
                 {/* Right Side: Enhanced sequence */}
                 <div className="bg-space-navy-950 border border-space-navy-850 rounded-lg aspect-square relative overflow-hidden flex items-center justify-center">
                   <img 
-                    src={imageUrl} 
+                    src={rawTimestamps.includes(currentTime) && !generatedTimestamps.includes(currentTime) ? gtImageUrl : imageUrl} 
                     alt="AI Enhanced Sequence" 
                     className="absolute inset-0 w-full h-full object-contain pointer-events-none"
                     draggable={false}
@@ -705,25 +720,25 @@ export default function ScientificComparisonWorkspace({
                 {/* Active Slider Progress Bar */}
                 <div className="flex items-center space-x-4">
                   <span className="text-[10px] font-mono text-slate-400 w-12 text-left">
-                    {sortedTimeline[0]}
+                    {activeTimeline[0]}
                   </span>
                   
                   <input 
                     type="range" 
                     min="0" 
-                    max={sortedTimeline.length - 1} 
-                    value={sortedTimeline.indexOf(currentTime)}
+                    max={activeTimeline.length - 1} 
+                    value={activeTimeline.indexOf(currentTime) === -1 ? 0 : activeTimeline.indexOf(currentTime)}
                     onChange={(e) => {
                       const idx = parseInt(e.target.value);
-                      if (!isNaN(idx) && sortedTimeline[idx]) {
-                        setCurrentTime(sortedTimeline[idx]);
+                      if (!isNaN(idx) && activeTimeline[idx]) {
+                        setCurrentTime(activeTimeline[idx]);
                       }
                     }}
                     className="grow h-1.5 bg-space-navy-950 rounded-lg appearance-none cursor-pointer accent-cyan-accent"
                   />
                   
                   <span className="text-[10px] font-mono text-slate-400 w-12 text-right">
-                    {sortedTimeline[sortedTimeline.length - 1]}
+                    {activeTimeline[activeTimeline.length - 1]}
                   </span>
                 </div>
 
@@ -761,6 +776,37 @@ export default function ScientificComparisonWorkspace({
                       title="Next frame"
                     >
                       <SkipForward className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  {/* Playback mode filter */}
+                  <div className="flex bg-space-navy-950 p-0.5 rounded border border-space-navy-800 text-[9px] font-mono select-none">
+                    <button
+                      onClick={() => {
+                        setPlaybackSequence("raw");
+                        if (!rawTimestamps.includes(currentTime)) {
+                          setCurrentTime(rawTimestamps[0]);
+                        }
+                      }}
+                      className={`px-2.5 py-1 rounded font-bold transition-all cursor-pointer ${
+                        playbackSequence === "raw"
+                          ? "bg-cyan-accent text-space-navy-950"
+                          : "text-slate-400 hover:text-white"
+                      }`}
+                      title="Loop through raw telemetry observations only"
+                    >
+                      Original Only
+                    </button>
+                    <button
+                      onClick={() => setPlaybackSequence("all")}
+                      className={`px-2.5 py-1 rounded font-bold transition-all cursor-pointer ${
+                        playbackSequence === "all"
+                          ? "bg-cyan-accent text-space-navy-950"
+                          : "text-slate-400 hover:text-white"
+                      }`}
+                      title="Loop through raw observations and synthesized AI frames"
+                    >
+                      AI Enhanced
                     </button>
                   </div>
 
