@@ -142,7 +142,8 @@ def run_background_inference(
         print(f"[BG INFERENCE] Started task {task_key}")
         
         # Stream download directly to temporary npy.gz file to save memory
-        temp_gzip = out_nc_path.with_suffix(".npy.gz")
+        from pathlib import Path
+        temp_gzip = Path(out_nc_path).with_suffix(".npy.gz")
         duration_ms = _call_hf_inference(
             str(nc_path_a), str(nc_path_b), str(temp_gzip), timestep=timestep
         )
