@@ -1,4 +1,4 @@
-# Ignore local Python environments and caches
+# Python runtime artifacts
 .venv/
 __pycache__/
 *.pyc
@@ -7,7 +7,7 @@ __pycache__/
 .pytest_cache/
 .ipynb_checkpoints/
 
-# Ignore Next.js node modules and build outputs
+# Next.js build outputs
 node_modules/
 .next/
 out/
@@ -16,14 +16,13 @@ build/
 .env.production
 .env.development
 
-# Ignore large telemetry data layers, caches, and weight files
-datasets/
-ingest/
-models/
+# Large binary data — excluded from Docker image (mount via volumes or external storage)
+backend/datasets/
+backend/ingest/
+backend/models/
 backend/cache/
-backend/data/metadata.json
 
-# Ignore IDE configs and local logs
+# IDE and local tooling
 .git/
 .gitignore
 .agents/
@@ -31,4 +30,5 @@ backend/data/metadata.json
 .vscode/
 .idea/
 *.log
-*.md
+
+# NOTE: backend/data/metadata.json is intentionally NOT excluded — it must be present in the image
