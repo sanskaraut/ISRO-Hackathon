@@ -6,7 +6,7 @@ import time
 import numpy as np
 import xarray as xr
 from PIL import Image
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from schemas.responses import GenerateRequest, GenerateResponse, MetricSchema
 from services.dataset_scanner import (
     get_metadata_index,
@@ -22,6 +22,10 @@ router = APIRouter()
 GLOBAL_MIN = float(os.getenv("GLOBAL_MIN", "215.5"))
 GLOBAL_MAX = float(os.getenv("GLOBAL_MAX", "299.25"))
 HF_SPACES_URL = os.getenv("HF_SPACES_URL", "").rstrip("/")
+
+# Global registry of active background inference tasks to prevent duplicate requests
+# and allow asynchronous client polling
+RUNNING_TASKS = {}
 
 
 def _png_to_b64(path) -> str:
@@ -107,8 +111,113 @@ def compute_metrics_against_ground_truth(generated_nc_path, gt_nc_path):
         print(f"[METRICS ERROR] Could not compute real metrics: {e}")
         return {"ssim": 0.9452, "psnr": 32.84, "mse": 12.14, "fsim": 0.9591, "is_simulated": True}
 
+
+def run_background_inference(
+    sat: str,
+    cy: str,
+    frame_a_time: str,
+    frame_b_time: str,
+    timestep: float,
+    nc_path_a: str,
+    nc_path_b: str,
+    out_nc_path: str,
+    out_png_path: str,
+    out_diff_path: str,
+    gt_nc_path: str,
+    has_gt: bool,
+    target_time_str: str,
+    task_key: str
+):
+    try:
+        print(f"[BG INFERENCE] Started task {task_key}")
+        final_img, duration_ms = _call_hf_inference(
+            str(nc_path_a), str(nc_path_b), timestep=timestep
+        )
+        
+        # Save output NetCDF
+        ds_out = xr.Dataset(
+            {"CMI": (['y', 'x'], final_img)},
+            coords={
+                'y': np.arange(final_img.shape[0]),
+                'x': np.arange(final_img.shape[1])
+            }
+        )
+        ds_out.to_netcdf(out_nc_path, encoding={"CMI": {"zlib": True, "complevel": 4}})
+        
+        # Save false-color preview PNG
+        array_to_png(final_img, GLOBAL_MIN, GLOBAL_MAX, out_png_path)
+        
+        # Save Difference/Error Heatmap PNG
+        gt_img = None
+        if has_gt:
+            try:
+                ds_gt = xr.open_dataset(gt_nc_path)
+                gt_img = ds_gt["CMI"].values.astype(np.float32)
+                gt_img = np.nan_to_num(gt_img, nan=GLOBAL_MIN)
+            except Exception as e:
+                print(f"[METRICS] Could not load ground truth image: {e}")
+                
+        if gt_img is not None:
+            # Calculate absolute difference
+            h_gt, w_gt = gt_img.shape
+            diff_img = np.abs(final_img[:h_gt, :w_gt] - gt_img)
+        else:
+            # Fallback: take gradients of the final image to simulate motion boundary errors
+            gradient_y, _ = np.gradient(final_img)
+            diff_img = np.abs(gradient_y) * 4.5
+            
+        # Draw False-Color Heatmap
+        diff_norm = np.clip(diff_img / 20.0, 0.0, 1.0)
+        diff_gray = (diff_norm * 255).astype(np.uint8)
+        h, w = diff_img.shape
+        diff_rgb = np.zeros((h, w, 3), dtype=np.uint8)
+        
+        diff_rgb[..., 0] = diff_gray
+        diff_rgb[..., 1] = (diff_gray * 0.15).astype(np.uint8)
+        diff_rgb[..., 2] = 20
+        
+        diff_img_pil = Image.fromarray(diff_rgb)
+        diff_img_pil.save(out_diff_path, "PNG")
+        
+        # Compute real metrics if we match a ground truth file
+        metrics = {
+            "ssim": 0.9452,
+            "psnr": 32.84,
+            "mse": 12.14,
+            "fsim": 0.9591,
+            "is_simulated": True
+        }
+        if has_gt:
+            metrics = compute_metrics_against_ground_truth(out_nc_path, gt_nc_path)
+            
+        # Calculate temporal resolution and depth
+        gap = time_str_to_minutes(frame_b_time) - time_str_to_minutes(frame_a_time)
+        res_val = gap * 0.5
+        temporal_res = f"{res_val:.1f} min" if res_val % 1 != 0 else f"{int(res_val)} min"
+        depth = 1 if abs(timestep - 0.5) < 0.01 else 2
+        
+        # Register new frame in database cache index
+        update_metadata_index(
+            sat, 
+            cy, 
+            target_time_str, 
+            has_ground_truth=has_gt,
+            metrics=metrics,
+            parent_timestamps=[frame_a_time, frame_b_time],
+            interpolation_depth=depth,
+            temporal_resolution=temporal_res,
+            inference_time=duration_ms,
+            model_version="best_model_512.pth"
+        )
+        print(f"[BG INFERENCE] Finished task {task_key}")
+    except Exception as e:
+        print(f"[BG INFERENCE ERROR] Task {task_key} failed: {e}")
+    finally:
+        RUNNING_TASKS.pop(task_key, None)
+
+
 @router.post("/generate", response_model=GenerateResponse)
-def generate_interpolated_frame(request: GenerateRequest):
+def generate_interpolated_frame(request: GenerateRequest, background_tasks: BackgroundTasks):
     """
     Generate an intermediate satellite frame between two observations (either raw or previously generated)
     using the resident PyTorch model.
@@ -204,6 +313,7 @@ def generate_interpolated_frame(request: GenerateRequest):
             metrics = compute_metrics_against_ground_truth(str(out_nc_path), str(gt_nc_path))
             
         return GenerateResponse(
+            status="complete",
             satellite=sat,
             cyclone_id=cy,
             frame_a_time=request.frame_a_time,
@@ -220,102 +330,38 @@ def generate_interpolated_frame(request: GenerateRequest):
             difference_png_data=_png_to_b64(out_diff_path),
         )
         
-    # 6. CALL HF SPACES INFERENCE MICROSERVICE
-    print(f"[INFERENCE] Sending {request.frame_a_time} + {request.frame_b_time} to HF Spaces -> {target_time_str}...")
-    try:
-        final_img, duration_ms = _call_hf_inference(
-            str(nc_path_a), str(nc_path_b), timestep=request.timestep
+    # Check if task is already running in background
+    task_key = f"{sat}_{cy}_{t_target_clean}_{request.timestep}"
+    if task_key not in RUNNING_TASKS:
+        RUNNING_TASKS[task_key] = "processing"
+        background_tasks.add_task(
+            run_background_inference,
+            sat, cy, request.frame_a_time, request.frame_b_time, request.timestep,
+            str(nc_path_a), str(nc_path_b), str(out_nc_path), str(out_png_path), str(out_diff_path),
+            str(gt_nc_path), has_gt, target_time_str, task_key
         )
-        
-        # Save output NetCDF
-        ds_out = xr.Dataset(
-            {"CMI": (['y', 'x'], final_img)},
-            coords={
-                'y': np.arange(final_img.shape[0]),
-                'x': np.arange(final_img.shape[1])
-            }
-        )
-        ds_out.to_netcdf(out_nc_path, encoding={"CMI": {"zlib": True, "complevel": 4}})
-        
-        # Save false-color preview PNG
-        array_to_png(final_img, GLOBAL_MIN, GLOBAL_MAX, out_png_path)
-        
-        # Save Difference/Error Heatmap PNG
-        gt_img = None
-        if has_gt:
-            try:
-                ds_gt = xr.open_dataset(gt_nc_path)
-                gt_img = ds_gt["CMI"].values.astype(np.float32)
-                gt_img = np.nan_to_num(gt_img, nan=GLOBAL_MIN)
-            except Exception as e:
-                print(f"[METRICS] Could not load ground truth image: {e}")
-                
-        if gt_img is not None:
-            # Calculate absolute difference
-            h_gt, w_gt = gt_img.shape
-            diff_img = np.abs(final_img[:h_gt, :w_gt] - gt_img)
-        else:
-            # Fallback: take gradients of the final image to simulate motion boundary errors
-            gradient_y, _ = np.gradient(final_img)
-            diff_img = np.abs(gradient_y) * 4.5
-            
-        # Draw False-Color Heatmap
-        diff_norm = np.clip(diff_img / 20.0, 0.0, 1.0)
-        diff_gray = (diff_norm * 255).astype(np.uint8)
-        h, w = diff_img.shape
-        diff_rgb = np.zeros((h, w, 3), dtype=np.uint8)
-        
-        diff_rgb[..., 0] = diff_gray
-        diff_rgb[..., 1] = (diff_gray * 0.15).astype(np.uint8)
-        diff_rgb[..., 2] = 20
-        
-        diff_img_pil = Image.fromarray(diff_rgb)
-        diff_img_pil.save(out_diff_path, "PNG")
-        
-        # Compute real metrics if we match a ground truth file
-        if has_gt:
-            metrics = compute_metrics_against_ground_truth(out_nc_path, gt_nc_path)
-            
-        # Calculate temporal resolution and depth
-        gap = time_str_to_minutes(request.frame_b_time) - time_str_to_minutes(request.frame_a_time)
-        res_val = gap * 0.5
-        temporal_res = f"{res_val:.1f} min" if res_val % 1 != 0 else f"{int(res_val)} min"
-        depth = 1 if abs(request.timestep - 0.5) < 0.01 else 2
-        
-        # Register new frame in database cache index
-        update_metadata_index(
-            sat, 
-            cy, 
-            target_time_str, 
-            has_ground_truth=has_gt,
-            metrics=metrics,
-            parent_timestamps=[request.frame_a_time, request.frame_b_time],
-            interpolation_depth=depth,
-            temporal_resolution=temporal_res,
-            inference_time=duration_ms,
-            model_version="best_model_512.pth"
-        )
-        
-        return GenerateResponse(
-            satellite=sat,
-            cyclone_id=cy,
-            frame_a_time=request.frame_a_time,
-            frame_b_time=request.frame_b_time,
-            timestep=request.timestep,
-            timestamp=target_time_str,
-            inference_time_ms=duration_ms,
-            metrics=MetricSchema(**metrics),
-            png_url=secure_png_url,
-            difference_png_url=secure_diff_url,
-            is_difference_map_placeholder=is_diff_placeholder,
-            nc_url=secure_nc_url,
-            png_data=_png_to_b64(out_png_path),
-            difference_png_data=_png_to_b64(out_diff_path),
-        )
-        
-    except Exception as e:
-        print(f"[ERROR] Inference engine crash: {e}")
-        raise HTTPException(status_code=500, detail=f"Inference failure: {str(e)}")
+        logger.info(f"[INFERENCE ENGINE] Dispatched task {task_key} to background thread.")
+    else:
+        logger.info(f"[INFERENCE ENGINE] Task {task_key} is already running. Client polling...")
+
+    # Return immediate HTTP 202 status processing response
+    return GenerateResponse(
+        status="processing",
+        satellite=sat,
+        cyclone_id=cy,
+        frame_a_time=request.frame_a_time,
+        frame_b_time=request.frame_b_time,
+        timestep=request.timestep,
+        timestamp=target_time_str,
+        inference_time_ms=0.0,
+        metrics=MetricSchema(**metrics),
+        png_url=secure_png_url,
+        difference_png_url=secure_diff_url,
+        is_difference_map_placeholder=is_diff_placeholder,
+        nc_url=secure_nc_url,
+        png_data=None,
+        difference_png_data=None
+    )
 
 import uuid
 import shutil

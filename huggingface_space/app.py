@@ -58,6 +58,9 @@ def _load_model():
         return
 
     _device = torch.device(DEVICE_STR)
+    if DEVICE_STR == "cpu":
+        torch.set_num_threads(2)
+        logger.info(f"[STARTUP] Set PyTorch CPU threads to {torch.get_num_threads()}")
     logger.info(f"[STARTUP] Loading model on {_device} from {MODEL_PATH}")
 
     _model = CNN_Attention_RIFE_Temporal(feature_dim=64)

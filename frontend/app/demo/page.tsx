@@ -292,23 +292,40 @@ export default function DemoPage() {
     });
 
     try {
-      const response = await fetch(getApiUrl("/generate"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          satellite: cyclone.satellite,
-          cyclone_id: cyclone.id,
-          frame_a_time: selectedFrames[0],
-          frame_b_time: selectedFrames[1],
-          timestep: 0.5
-        })
-      });
+      let result = null;
+      let attempts = 0;
+      const maxAttempts = 60; // 5 minutes max (60 * 5s)
+      
+      while (attempts < maxAttempts) {
+        const response = await fetch(getApiUrl("/generate"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            satellite: cyclone.satellite,
+            cyclone_id: cyclone.id,
+            frame_a_time: selectedFrames[0],
+            frame_b_time: selectedFrames[1],
+            timestep: 0.5
+          })
+        });
 
-      if (!response.ok) {
-        throw new Error("Backend inference returned an error.");
+        if (!response.ok) {
+          throw new Error("Backend inference returned an error.");
+        }
+
+        result = await response.json();
+        if (result && result.status !== "processing") {
+          break;
+        }
+
+        // Wait 5 seconds before polling again
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        attempts++;
       }
 
-      const result = await response.json();
+      if (!result || result.status === "processing") {
+        throw new Error("Inference execution timed out.");
+      }
       
       // Clear pending timeouts immediately to bypass artificial delay
       timeouts.forEach(clearTimeout);

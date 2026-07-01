@@ -41,18 +41,19 @@ class MetricSchema(BaseModel):
     is_simulated: bool = True
 
 class GenerateResponse(BaseModel):
+    status: str = "complete"  # "complete" or "processing"
     satellite: str
     cyclone_id: str
     frame_a_time: str
     frame_b_time: str
     timestep: float
     timestamp: str  # Dynamically generated target timestamp (e.g. "01:15" or "01:07:30")
-    inference_time_ms: float
-    metrics: MetricSchema
-    png_url: str
+    inference_time_ms: Optional[float] = 0.0
+    metrics: Optional[MetricSchema] = None
+    png_url: Optional[str] = None
     difference_png_url: Optional[str] = None
-    is_difference_map_placeholder: bool = False
-    nc_url: str
+    is_difference_map_placeholder: Optional[bool] = False
+    nc_url: Optional[str] = None
     # Inline base64-encoded PNGs — avoids a second /frame fetch that may 404
     # on ephemeral-disk hosts (Render free tier restarts wipe cache/)
     png_data: Optional[str] = None        # "data:image/png;base64,..."
