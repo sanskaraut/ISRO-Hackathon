@@ -53,3 +53,7 @@ class GenerateResponse(BaseModel):
     difference_png_url: Optional[str] = None
     is_difference_map_placeholder: bool = False
     nc_url: str
+    # Inline base64-encoded PNGs — avoids a second /frame fetch that may 404
+    # on ephemeral-disk hosts (Render free tier restarts wipe cache/)
+    png_data: Optional[str] = None        # "data:image/png;base64,..."
+    difference_png_data: Optional[str] = None

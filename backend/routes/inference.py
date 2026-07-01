@@ -1,5 +1,6 @@
 import os
 import io
+import base64
 import gzip
 import time
 import numpy as np
@@ -21,6 +22,15 @@ router = APIRouter()
 GLOBAL_MIN = float(os.getenv("GLOBAL_MIN", "215.5"))
 GLOBAL_MAX = float(os.getenv("GLOBAL_MAX", "299.25"))
 HF_SPACES_URL = os.getenv("HF_SPACES_URL", "").rstrip("/")
+
+
+def _png_to_b64(path) -> str:
+    """Read a PNG file and return a data-URL base64 string."""
+    try:
+        with open(path, "rb") as f:
+            return "data:image/png;base64," + base64.b64encode(f.read()).decode()
+    except Exception:
+        return ""
 
 def _call_hf_inference(nc_path_a: str, nc_path_b: str, timestep: float = 0.5) -> tuple:
     """
@@ -205,7 +215,9 @@ def generate_interpolated_frame(request: GenerateRequest):
             png_url=secure_png_url,
             difference_png_url=secure_diff_url,
             is_difference_map_placeholder=is_diff_placeholder,
-            nc_url=secure_nc_url
+            nc_url=secure_nc_url,
+            png_data=_png_to_b64(out_png_path),
+            difference_png_data=_png_to_b64(out_diff_path),
         )
         
     # 6. CALL HF SPACES INFERENCE MICROSERVICE
@@ -296,7 +308,9 @@ def generate_interpolated_frame(request: GenerateRequest):
             png_url=secure_png_url,
             difference_png_url=secure_diff_url,
             is_difference_map_placeholder=is_diff_placeholder,
-            nc_url=secure_nc_url
+            nc_url=secure_nc_url,
+            png_data=_png_to_b64(out_png_path),
+            difference_png_data=_png_to_b64(out_diff_path),
         )
         
     except Exception as e:
@@ -406,7 +420,7 @@ def upload_generate(
         temp_a_path.unlink(missing_ok=True)
         temp_b_path.unlink(missing_ok=True)
         
-        # Return relative path URLs to be host/port agnostic
+        # Return relative path URLs to be host/port agnostic, plus inline base64 data for robustness
         return {
             "success": True,
             "uid": uid,
@@ -415,7 +429,11 @@ def upload_generate(
             "diff_url": f"/frame?satellite=CUSTOM&cyclone_id=UPLOAD&timestamp={uid}&type=difference&format=png",
             "download_url": f"/frame?satellite=CUSTOM&cyclone_id=UPLOAD&timestamp={uid}&type=interpolated&format=nc",
             "image_a_url": f"/frame?satellite=CUSTOM&cyclone_id=UPLOAD&timestamp={uid}_a&type=interpolated&format=png",
-            "image_b_url": f"/frame?satellite=CUSTOM&cyclone_id=UPLOAD&timestamp={uid}_b&type=interpolated&format=png"
+            "image_b_url": f"/frame?satellite=CUSTOM&cyclone_id=UPLOAD&timestamp={uid}_b&type=interpolated&format=png",
+            "image_data": _png_to_b64(output_png_path),
+            "diff_data": _png_to_b64(output_diff_path),
+            "image_a_data": _png_to_b64(output_png_a_path),
+            "image_b_data": _png_to_b64(output_png_b_path),
         }
         
     except Exception as e:

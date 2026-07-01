@@ -235,9 +235,9 @@ export default function UploadWorkspace() {
               <ImagePanel
                 title="Input File A"
                 timestamp="t=0"
-                image={result?.image_a_url}
+                image={result?.image_a_data || result?.image_a_url}
                 frameType="Uploaded Observation"
-                onZoom={() => triggerZoom(result?.image_a_url, "Input File A (t=0)")}
+                onZoom={() => triggerZoom(result?.image_a_data || result?.image_a_url, "Input File A (t=0)")}
                 downloadUrl={result?.image_a_url ? getApiUrl(`/frame?satellite=CUSTOM&cyclone_id=UPLOAD&timestamp=${result.uid}_a&type=interpolated&format=nc`) : null}
               />
             )}
@@ -251,9 +251,9 @@ export default function UploadWorkspace() {
               <ImagePanel
                 title="AI Synthesized Midpoint"
                 timestamp="t=0.5"
-                image={result?.image_url}
+                image={result?.image_data || result?.image_url}
                 frameType="AI Synthesized Frame"
-                onZoom={() => triggerZoom(result?.image_url, "AI Synthesized Midpoint (t=0.5)")}
+                onZoom={() => triggerZoom(result?.image_data || result?.image_url, "AI Synthesized Midpoint (t=0.5)")}
                 downloadUrl={result?.download_url}
               />
             )}
@@ -270,9 +270,9 @@ export default function UploadWorkspace() {
               <ImagePanel
                 title="Discrepancy Map"
                 timestamp="t=0.5"
-                image={result?.diff_url}
+                image={result?.diff_data || result?.diff_url}
                 frameType="Discrepancy Map"
-                onZoom={() => triggerZoom(result?.diff_url, "Discrepancy Map (t=0.5)")}
+                onZoom={() => triggerZoom(result?.diff_data || result?.diff_url, "Discrepancy Map (t=0.5)")}
                 downloadUrl={result?.diff_url ? getApiUrl(`/frame?satellite=CUSTOM&cyclone_id=UPLOAD&timestamp=${result.uid}&type=difference&format=nc`) : null}
               />
             )}

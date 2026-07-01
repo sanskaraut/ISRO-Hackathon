@@ -93,10 +93,46 @@ def get_frame(
         full_path = config.CACHE_DIR / filename
         
     if not full_path.exists():
-        raise HTTPException(
-            status_code=404, 
-            detail=f"Requested {type} file not found (Format: {format}, Path: {filename})."
-        )
+        # PNG may have been wiped by an ephemeral-disk restart — try regenerating from NC
+        if format == "png" and type in ("interpolated", "difference"):
+            nc_path = config.CACHE_DIR / f"rec_{sat}_{cy}_{t_clean}.nc"
+            if nc_path.exists():
+                import numpy as np
+                import xarray as xr
+                from services.dataset_scanner import array_to_png
+                try:
+                    ds = xr.open_dataset(str(nc_path))
+                    arr = ds["CMI"].values.astype(np.float32)
+                    ds.close()
+                    global_min = float(os.getenv("GLOBAL_MIN", "215.5"))
+                    global_max = float(os.getenv("GLOBAL_MAX", "299.25"))
+                    if type == "difference":
+                        diff_norm = np.clip(np.abs(arr) / 20.0, 0.0, 1.0)
+                        diff_gray = (diff_norm * 255).astype(np.uint8)
+                        h, w = arr.shape
+                        diff_rgb = np.zeros((h, w, 3), dtype=np.uint8)
+                        diff_rgb[..., 0] = diff_gray
+                        diff_rgb[..., 1] = (diff_gray * 0.15).astype(np.uint8)
+                        diff_rgb[..., 2] = 20
+                        from PIL import Image as _Image
+                        _Image.fromarray(diff_rgb).save(str(full_path), "PNG")
+                    else:
+                        array_to_png(arr, global_min, global_max, full_path)
+                except Exception as regen_err:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"File missing and regeneration failed: {regen_err}"
+                    )
+            else:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Requested {type} file not found (Format: {format}, Path: {filename})."
+                )
+        else:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Requested {type} file not found (Format: {format}, Path: {filename})."
+            )
         
     media_type = "image/png" if format == "png" else "application/x-netcdf"
     return FileResponse(str(full_path), media_type=media_type)

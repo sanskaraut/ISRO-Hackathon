@@ -360,6 +360,10 @@ export default function DemoPage() {
       resolvedType = "interpolated";
     }
     
+    if (resolvedType === "interpolated" && generatedFrames[timestamp]?.png_data) {
+      return generatedFrames[timestamp].png_data;
+    }
+    
     return getApiUrl(`/frame?satellite=${cyclone.satellite}&cyclone_id=${cyclone.id}&timestamp=${timestamp}&type=${resolvedType}&format=png`);
   };
 
@@ -724,9 +728,9 @@ export default function DemoPage() {
                 hasGroundTruth={!!cyclone?.ground_truth_availability?.[currentTime]}
                 metrics={frameMetrics}
                 inferenceTimeMs={infTime}
-                imageUrl={getApiUrl(`/frame?satellite=${cyclone?.satellite}&cyclone_id=${cyclone?.id}&timestamp=${currentTime}&type=interpolated&format=png`)}
+                imageUrl={generatedFrames[currentTime]?.png_data || getApiUrl(`/frame?satellite=${cyclone?.satellite}&cyclone_id=${cyclone?.id}&timestamp=${currentTime}&type=interpolated&format=png`)}
                 gtImageUrl={getApiUrl(`/frame?satellite=${cyclone?.satellite}&cyclone_id=${cyclone?.id}&timestamp=${currentTime}&type=raw&format=png`)}
-                diffImageUrl={getApiUrl(`/frame?satellite=${cyclone?.satellite}&cyclone_id=${cyclone?.id}&timestamp=${currentTime}&type=difference&format=png`)}
+                diffImageUrl={generatedFrames[currentTime]?.difference_png_data || getApiUrl(`/frame?satellite=${cyclone?.satellite}&cyclone_id=${cyclone?.id}&timestamp=${currentTime}&type=difference&format=png`)}
                 downloadNcUrl={getApiUrl(`/frame?satellite=${cyclone?.satellite}&cyclone_id=${cyclone?.id}&timestamp=${currentTime}&type=interpolated&format=nc`)}
                 downloadGtNcUrl={cyclone?.ground_truth_availability?.[currentTime] ? getApiUrl(`/frame?satellite=${cyclone?.satellite}&cyclone_id=${cyclone?.id}&timestamp=${currentTime}&type=raw&format=nc`) : null}
                 downloadDiffNcUrl={getApiUrl(`/frame?satellite=${cyclone?.satellite}&cyclone_id=${cyclone?.id}&timestamp=${currentTime}&type=difference&format=nc`)}
