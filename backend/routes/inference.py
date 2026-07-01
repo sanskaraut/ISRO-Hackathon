@@ -76,12 +76,19 @@ def compute_metrics_against_ground_truth(generated_nc_path, gt_nc_path):
     try:
         ds_gen = xr.open_dataset(generated_nc_path)
         gen_img = ds_gen["CMI"].values.astype(np.float32)
+        ds_gen.close()
 
         ds_gt = xr.open_dataset(gt_nc_path)
         gt_img = ds_gt["CMI"].values.astype(np.float32)
+        ds_gt.close()
 
         gen_img = np.nan_to_num(gen_img, nan=GLOBAL_MIN)
         gt_img  = np.nan_to_num(gt_img,  nan=GLOBAL_MIN)
+
+        # Downsample for safety and memory limit on Render (512MB)
+        factor = max(1, min(gen_img.shape) // 1024)
+        gen_img = gen_img[::factor, ::factor]
+        gt_img = gt_img[::factor, ::factor]
 
         h = min(gen_img.shape[0], gt_img.shape[0])
         w = min(gen_img.shape[1], gt_img.shape[1])
@@ -134,7 +141,7 @@ def run_background_inference(
             str(nc_path_a), str(nc_path_b), timestep=timestep
         )
         
-        # Save output NetCDF
+        # Save output NetCDF without compression to avoid memory-hungry zlib compression in Render RAM
         ds_out = xr.Dataset(
             {"CMI": (['y', 'x'], final_img)},
             coords={
@@ -142,35 +149,41 @@ def run_background_inference(
                 'x': np.arange(final_img.shape[1])
             }
         )
-        ds_out.to_netcdf(out_nc_path, encoding={"CMI": {"zlib": True, "complevel": 4}})
+        ds_out.to_netcdf(out_nc_path)
+        ds_out.close()
         
-        # Save false-color preview PNG
-        array_to_png(final_img, GLOBAL_MIN, GLOBAL_MAX, out_png_path)
+        # Downsample for false-color preview PNG (max 1024px to save memory)
+        h, w = final_img.shape
+        factor = max(1, min(h, w) // 1024)
+        final_down = final_img[::factor, ::factor]
+        array_to_png(final_down, GLOBAL_MIN, GLOBAL_MAX, out_png_path)
         
-        # Save Difference/Error Heatmap PNG
+        # Save Difference/Error Heatmap PNG (downsampled to save memory)
         gt_img = None
         if has_gt:
             try:
                 ds_gt = xr.open_dataset(gt_nc_path)
                 gt_img = ds_gt["CMI"].values.astype(np.float32)
                 gt_img = np.nan_to_num(gt_img, nan=GLOBAL_MIN)
+                ds_gt.close()
             except Exception as e:
                 print(f"[METRICS] Could not load ground truth image: {e}")
                 
         if gt_img is not None:
-            # Calculate absolute difference
-            h_gt, w_gt = gt_img.shape
-            diff_img = np.abs(final_img[:h_gt, :w_gt] - gt_img)
+            # Calculate absolute difference on downsampled images
+            gt_down = gt_img[::factor, ::factor]
+            h_gt, w_gt = gt_down.shape
+            diff_img = np.abs(final_down[:h_gt, :w_gt] - gt_down)
         else:
             # Fallback: take gradients of the final image to simulate motion boundary errors
-            gradient_y, _ = np.gradient(final_img)
+            gradient_y, _ = np.gradient(final_down)
             diff_img = np.abs(gradient_y) * 4.5
             
         # Draw False-Color Heatmap
         diff_norm = np.clip(diff_img / 20.0, 0.0, 1.0)
         diff_gray = (diff_norm * 255).astype(np.uint8)
-        h, w = diff_img.shape
-        diff_rgb = np.zeros((h, w, 3), dtype=np.uint8)
+        hd, wd = diff_img.shape
+        diff_rgb = np.zeros((hd, wd, 3), dtype=np.uint8)
         
         diff_rgb[..., 0] = diff_gray
         diff_rgb[..., 1] = (diff_gray * 0.15).astype(np.uint8)
