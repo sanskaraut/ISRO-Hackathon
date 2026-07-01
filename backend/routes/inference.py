@@ -16,6 +16,7 @@ from services.dataset_scanner import (
     array_to_png
 )
 import requests as http_requests
+import config
 
 router = APIRouter()
 
@@ -75,24 +76,28 @@ def _call_hf_inference(nc_path_a: str, nc_path_b: str, temp_gzip_path: str, time
 def compute_metrics_against_ground_truth(generated_nc_path, gt_nc_path):
     """
     Compare generated frame vs ground truth using numpy and direct netCDF4 access (no PyTorch, no xarray overhead).
+    Reads sliced arrays directly from disk to keep memory footprint under 6MB.
     """
     try:
         import netCDF4 as nc
         
-        # Read using netCDF4 library directly to avoid xarray metadata memory overhead
-        with nc.Dataset(generated_nc_path, "r") as f_gen:
-            gen_img = f_gen.variables["CMI"][:].astype(np.float32)
-            
-        with nc.Dataset(gt_nc_path, "r") as f_gt:
-            gt_img = f_gt.variables["CMI"][:].astype(np.float32)
+        # Read header shape first to calculate downsampling factor without loading array
+        with config.NETCDF_LOCK:
+            with nc.Dataset(generated_nc_path, "r") as f_gen:
+                shape = f_gen.variables["CMI"].shape
+                
+        factor = max(1, min(shape) // 1024)
+        
+        # Read sliced arrays directly from disk under thread lock
+        with config.NETCDF_LOCK:
+            with nc.Dataset(generated_nc_path, "r") as f_gen:
+                gen_img = f_gen.variables["CMI"][::factor, ::factor].astype(np.float32)
+                
+            with nc.Dataset(gt_nc_path, "r") as f_gt:
+                gt_img = f_gt.variables["CMI"][::factor, ::factor].astype(np.float32)
 
         gen_img = np.nan_to_num(gen_img, nan=GLOBAL_MIN)
         gt_img  = np.nan_to_num(gt_img,  nan=GLOBAL_MIN)
-
-        # Downsample for safety and memory limit on Render (512MB)
-        factor = max(1, min(gen_img.shape) // 1024)
-        gen_img = gen_img[::factor, ::factor]
-        gt_img = gt_img[::factor, ::factor]
 
         h = min(gen_img.shape[0], gt_img.shape[0])
         w = min(gen_img.shape[1], gt_img.shape[1])
@@ -156,13 +161,14 @@ def run_background_inference(
         # Delete the temp gzip file immediately
         temp_gzip.unlink(missing_ok=True)
         
-        # Save output NetCDF using netCDF4 library directly to avoid xarray memory overhead
+        # Save output NetCDF using netCDF4 library directly under thread lock
         import netCDF4 as nc
-        with nc.Dataset(str(out_nc_path), "w", format="NETCDF4") as f_nc:
-            f_nc.createDimension("y", final_img.shape[0])
-            f_nc.createDimension("x", final_img.shape[1])
-            var = f_nc.createVariable("CMI", "f4", ("y", "x"))
-            var[:] = final_img
+        with config.NETCDF_LOCK:
+            with nc.Dataset(str(out_nc_path), "w", format="NETCDF4") as f_nc:
+                f_nc.createDimension("y", final_img.shape[0])
+                f_nc.createDimension("x", final_img.shape[1])
+                var = f_nc.createVariable("CMI", "f4", ("y", "x"))
+                var[:] = final_img
             
         # Downsample for false-color preview PNG (max 1024px to save memory)
         h, w = final_img.shape
@@ -176,19 +182,20 @@ def run_background_inference(
         
         array_to_png(final_down, GLOBAL_MIN, GLOBAL_MAX, out_png_path)
         
-        # Save Difference/Error Heatmap PNG (downsampled to save memory)
-        gt_img = None
+        # Save Difference/Error Heatmap PNG (downsampled sliced reading from disk to save memory)
+        gt_down = None
         if has_gt:
             try:
-                with nc.Dataset(str(gt_nc_path), "r") as f_gt:
-                    gt_img = f_gt.variables["CMI"][:].astype(np.float32)
-                gt_img = np.nan_to_num(gt_img, nan=GLOBAL_MIN)
+                with config.NETCDF_LOCK:
+                    with nc.Dataset(str(gt_nc_path), "r") as f_gt:
+                        # Load sliced array directly from disk to keep RAM near 0 MB
+                        gt_down = f_gt.variables["CMI"][::factor, ::factor].astype(np.float32)
+                gt_down = np.nan_to_num(gt_down, nan=GLOBAL_MIN)
             except Exception as e:
                 print(f"[METRICS] Could not load ground truth image: {e}")
                 
-        if gt_img is not None:
+        if gt_down is not None:
             # Calculate absolute difference on downsampled images
-            gt_down = gt_img[::factor, ::factor]
             h_gt, w_gt = gt_down.shape
             diff_img = np.abs(final_down[:h_gt, :w_gt] - gt_down)
         else:

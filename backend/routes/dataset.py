@@ -101,9 +101,10 @@ def get_frame(
                 import xarray as xr
                 from services.dataset_scanner import array_to_png
                 try:
-                    ds = xr.open_dataset(str(nc_path))
-                    arr = ds["CMI"].values.astype(np.float32)
-                    ds.close()
+                    with config.NETCDF_LOCK:
+                        ds = xr.open_dataset(str(nc_path))
+                        arr = ds["CMI"].values.astype(np.float32)
+                        ds.close()
                     global_min = float(os.getenv("GLOBAL_MIN", "215.5"))
                     global_max = float(os.getenv("GLOBAL_MAX", "299.25"))
                     if type == "difference":

@@ -1,5 +1,8 @@
 import os
+import threading
 from pathlib import Path
+
+NETCDF_LOCK = threading.Lock()
 
 # Resolve backend directory dynamically (assumes layout: project_root/backend/config.py)
 BASE_DIR = Path(__file__).resolve().parent
