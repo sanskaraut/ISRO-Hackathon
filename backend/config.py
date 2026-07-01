@@ -4,12 +4,11 @@ from pathlib import Path
 # Resolve backend directory dynamically (assumes layout: project_root/backend/config.py)
 BASE_DIR = Path(__file__).resolve().parent
 
-# Core path configurations
-DATASETS_DIR = Path(os.getenv("DATASETS_DIR", BASE_DIR / "datasets"))
-INGEST_DIR = Path(os.getenv("INGEST_DIR", BASE_DIR / "ingest"))
-CACHE_DIR = Path(os.getenv("CACHE_DIR", BASE_DIR / "cache"))
-METADATA_PATH = Path(os.getenv("METADATA_PATH", BASE_DIR / "data" / "metadata.json"))
-MODEL_PATH = Path(os.getenv("MODEL_PATH", BASE_DIR / "models" / "best_model_512.pth"))
+DATASETS_DIR = Path(os.getenv("DATASETS_DIR", BASE_DIR / "datasets")).resolve()
+INGEST_DIR = Path(os.getenv("INGEST_DIR", BASE_DIR / "ingest")).resolve()
+CACHE_DIR = Path(os.getenv("CACHE_DIR", BASE_DIR / "cache")).resolve()
+METADATA_PATH = Path(os.getenv("METADATA_PATH", BASE_DIR / "data" / "metadata.json")).resolve()
+MODEL_PATH = Path(os.getenv("MODEL_PATH", BASE_DIR / "models" / "best_model_512.pth")).resolve()
 
 # Server options
 HOST = os.getenv("HOST", "0.0.0.0")

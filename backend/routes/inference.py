@@ -33,7 +33,8 @@ def _png_to_b64(path) -> str:
     try:
         with open(path, "rb") as f:
             return "data:image/png;base64," + base64.b64encode(f.read()).decode()
-    except Exception:
+    except Exception as e:
+        print(f"[B64 ERROR] Failed to encode {path}: {e}")
         return ""
 
 def _call_hf_inference(nc_path_a: str, nc_path_b: str, temp_gzip_path: str, timestep: float = 0.5) -> float:
