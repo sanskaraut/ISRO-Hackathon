@@ -36,19 +36,19 @@ def _png_to_b64(path) -> str:
     except Exception:
         return ""
 
-def _call_hf_inference(nc_path_a: str, nc_path_b: str, timestep: float = 0.5) -> tuple:
+def _call_hf_inference(nc_path_a: str, nc_path_b: str, temp_gzip_path: str, timestep: float = 0.5) -> float:
     """
     POST two .nc files to the Hugging Face Spaces inference microservice.
-    Returns (final_img: np.ndarray, duration_ms: float).
+    Streams the compressed .npy.gz response directly to disk chunk-by-chunk
+    to prevent memory spikes. Returns duration_ms.
     """
     if not HF_SPACES_URL:
         raise RuntimeError("HF_SPACES_URL environment variable is not set.")
 
     url = f"{HF_SPACES_URL}/interpolate"
-    start = time.time()
-
+    
     with open(nc_path_a, "rb") as fa, open(nc_path_b, "rb") as fb:
-        resp = http_requests.post(
+        with http_requests.post(
             url,
             files={
                 "file_a": ("frame_a.nc", fa, "application/octet-stream"),
@@ -56,31 +56,34 @@ def _call_hf_inference(nc_path_a: str, nc_path_b: str, timestep: float = 0.5) ->
             },
             data={"timestep": str(timestep)},
             timeout=600,  # 10-minute timeout for large CPU inference
-        )
-
-    if resp.status_code != 200:
-        raise RuntimeError(f"HF Spaces returned {resp.status_code}: {resp.text[:400]}")
-
-    duration_ms = (time.time() - start) * 1000
-
-    # Decompress and deserialise the numpy binary
-    decompressed = gzip.decompress(resp.content)
-    final_img = np.load(io.BytesIO(decompressed))
-    return final_img, duration_ms
+            stream=True
+        ) as resp:
+            if resp.status_code != 200:
+                raise RuntimeError(f"HF Spaces returned {resp.status_code}: {resp.text[:400]}")
+            
+            # Stream response directly to disk in 1MB chunks to minimize memory allocations
+            with open(temp_gzip_path, "wb") as f_out:
+                for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        f_out.write(chunk)
+            
+            duration_ms = float(resp.headers.get("X-Inference-Time-Ms", "0.0"))
+            return duration_ms
 
 
 def compute_metrics_against_ground_truth(generated_nc_path, gt_nc_path):
     """
-    Compare generated frame vs ground truth using numpy only (no PyTorch on Render).
+    Compare generated frame vs ground truth using numpy and direct netCDF4 access (no PyTorch, no xarray overhead).
     """
     try:
-        ds_gen = xr.open_dataset(generated_nc_path)
-        gen_img = ds_gen["CMI"].values.astype(np.float32)
-        ds_gen.close()
-
-        ds_gt = xr.open_dataset(gt_nc_path)
-        gt_img = ds_gt["CMI"].values.astype(np.float32)
-        ds_gt.close()
+        import netCDF4 as nc
+        
+        # Read using netCDF4 library directly to avoid xarray metadata memory overhead
+        with nc.Dataset(generated_nc_path, "r") as f_gen:
+            gen_img = f_gen.variables["CMI"][:].astype(np.float32)
+            
+        with nc.Dataset(gt_nc_path, "r") as f_gt:
+            gt_img = f_gt.variables["CMI"][:].astype(np.float32)
 
         gen_img = np.nan_to_num(gen_img, nan=GLOBAL_MIN)
         gt_img  = np.nan_to_num(gt_img,  nan=GLOBAL_MIN)
@@ -103,7 +106,7 @@ def compute_metrics_against_ground_truth(generated_nc_path, gt_nc_path):
         physical_mse = float(np.mean((gen_img - gt_img) ** 2))
         psnr = float(10 * np.log10(1.0 / (mse + 1e-10)))
 
-        # Approximate SSIM using windowed variance (lightweight, no PyTorch)
+        # Approximate SSIM using windowed variance
         diff = gen_norm - gt_norm
         ssim_approx = round(max(0.0, 1.0 - float(np.mean(diff ** 2)) * 50), 4)
 
@@ -137,35 +140,47 @@ def run_background_inference(
 ):
     try:
         print(f"[BG INFERENCE] Started task {task_key}")
-        final_img, duration_ms = _call_hf_inference(
-            str(nc_path_a), str(nc_path_b), timestep=timestep
+        
+        # Stream download directly to temporary npy.gz file to save memory
+        temp_gzip = out_nc_path.with_suffix(".npy.gz")
+        duration_ms = _call_hf_inference(
+            str(nc_path_a), str(nc_path_b), str(temp_gzip), timestep=timestep
         )
         
-        # Save output NetCDF without compression to avoid memory-hungry zlib compression in Render RAM
-        ds_out = xr.Dataset(
-            {"CMI": (['y', 'x'], final_img)},
-            coords={
-                'y': np.arange(final_img.shape[0]),
-                'x': np.arange(final_img.shape[1])
-            }
-        )
-        ds_out.to_netcdf(out_nc_path)
-        ds_out.close()
+        # Load the numpy array directly from the compressed file stream
+        with gzip.open(str(temp_gzip), "rb") as f_gz:
+            final_img = np.load(f_gz)
+            
+        # Delete the temp gzip file immediately
+        temp_gzip.unlink(missing_ok=True)
         
+        # Save output NetCDF using netCDF4 library directly to avoid xarray memory overhead
+        import netCDF4 as nc
+        with nc.Dataset(str(out_nc_path), "w", format="NETCDF4") as f_nc:
+            f_nc.createDimension("y", final_img.shape[0])
+            f_nc.createDimension("x", final_img.shape[1])
+            var = f_nc.createVariable("CMI", "f4", ("y", "x"))
+            var[:] = final_img
+            
         # Downsample for false-color preview PNG (max 1024px to save memory)
         h, w = final_img.shape
         factor = max(1, min(h, w) // 1024)
         final_down = final_img[::factor, ::factor]
+        
+        # Free up the huge full-resolution array memory immediately
+        del final_img
+        import gc
+        gc.collect()
+        
         array_to_png(final_down, GLOBAL_MIN, GLOBAL_MAX, out_png_path)
         
         # Save Difference/Error Heatmap PNG (downsampled to save memory)
         gt_img = None
         if has_gt:
             try:
-                ds_gt = xr.open_dataset(gt_nc_path)
-                gt_img = ds_gt["CMI"].values.astype(np.float32)
+                with nc.Dataset(str(gt_nc_path), "r") as f_gt:
+                    gt_img = f_gt.variables["CMI"][:].astype(np.float32)
                 gt_img = np.nan_to_num(gt_img, nan=GLOBAL_MIN)
-                ds_gt.close()
             except Exception as e:
                 print(f"[METRICS] Could not load ground truth image: {e}")
                 
@@ -225,6 +240,9 @@ def run_background_inference(
         print(f"[BG INFERENCE] Finished task {task_key}")
     except Exception as e:
         print(f"[BG INFERENCE ERROR] Task {task_key} failed: {e}")
+        # Clean up temp gzip file if task crashes before deletion
+        if 'temp_gzip' in locals() and temp_gzip.exists():
+            temp_gzip.unlink(missing_ok=True)
     finally:
         RUNNING_TASKS.pop(task_key, None)
 
