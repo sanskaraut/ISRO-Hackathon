@@ -7,7 +7,7 @@ import torch.nn.functional as F
 # 1. CNN Encoder
 # ============================================================================
 class CNNEncoder(nn.Module):
-    def __init__(self, in_channels=1, out_channels=64):
+    def __init__(self, in_channels=1, out_channels=96):
         super().__init__()
         self.encoder = nn.Sequential(
             nn.Conv2d(in_channels, 32, 3, padding=1),
@@ -37,16 +37,24 @@ class CNNEncoder(nn.Module):
             nn.BatchNorm2d(out_channels), nn.ReLU(inplace=True),
             nn.Conv2d(out_channels, out_channels, 3, stride=2, padding=1),
             nn.BatchNorm2d(out_channels), nn.ReLU(inplace=True),
+
+            nn.Conv2d(out_channels, out_channels, 3, padding=1),
+            nn.BatchNorm2d(out_channels), nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, 3, padding=1),
+            nn.BatchNorm2d(out_channels), nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, 3, stride=2, padding=1),
+            nn.BatchNorm2d(out_channels), nn.ReLU(inplace=True),
         )
 
     def forward(self, x):
-        return self.encoder(x)  # [B, C, H/16, W/16]
+        return self.encoder(x)  # [B, C, H/32, W/32]
+
 
 # ============================================================================
 # 2. Temporal Transformer
 # ============================================================================
 class TemporalTransformer(nn.Module):
-    def __init__(self, dim=64, num_heads=4, time_embed_dim=32):
+    def __init__(self, dim=96, num_heads=6, time_embed_dim=32):
         super().__init__()
         self.num_heads = num_heads
         self.dim = dim
@@ -74,17 +82,21 @@ class TemporalTransformer(nn.Module):
             timestep = timestep.view(B, 1)
         elif timestep.dim() == 1:
             timestep = timestep.unsqueeze(1)
-        time_emb = self.time_embed(timestep).unsqueeze(1)  # [B,1,C]
-        f0_seq = f0.flatten(2).transpose(1, 2)   # [B, N, C]
+
+        time_emb = self.time_embed(timestep).unsqueeze(1)  # [B, 1, C]
+        f0_seq = f0.flatten(2).transpose(1, 2)             # [B, N, C]
         f1_seq = f1.flatten(2).transpose(1, 2)
+
         f0_seq = f0_seq + time_emb
         f1_seq = f1_seq + time_emb
-        # Self-Attn
+
+        # Self-Attention
         attn_f0 = self.self_attn(self.norm1(f0_seq), self.norm1(f0_seq), self.norm1(f0_seq))[0]
         f0_seq = f0_seq + attn_f0
         attn_f1 = self.self_attn(self.norm1(f1_seq), self.norm1(f1_seq), self.norm1(f1_seq))[0]
         f1_seq = f1_seq + attn_f1
-        # Cross-Attn
+
+        # Cross-Attention
         f0_cross = self.cross_attn_f0(
             query=self.norm_cross(f0_seq),
             key=self.norm_cross(f1_seq),
@@ -97,18 +109,21 @@ class TemporalTransformer(nn.Module):
             value=self.norm_cross(f0_seq)
         )[0]
         f1_seq = f1_seq + f1_cross
+
         # FFN
         f0_seq = f0_seq + self.ffn(self.norm_ffn(f0_seq))
         f1_seq = f1_seq + self.ffn(self.norm_ffn(f1_seq))
+
         f0_out = f0_seq.transpose(1, 2).reshape(B, C, H, W)
         f1_out = f1_seq.transpose(1, 2).reshape(B, C, H, W)
         return f0_out, f1_out
+
 
 # ============================================================================
 # 3. Flow Network
 # ============================================================================
 class RIFEFlowNet(nn.Module):
-    def __init__(self, feature_dim=64):
+    def __init__(self, feature_dim=96):
         super().__init__()
         self.conv_in = nn.Conv2d(2 * feature_dim, 128, kernel_size=3, padding=1)
         self.encoder = nn.Sequential(
@@ -141,7 +156,8 @@ class RIFEFlowNet(nn.Module):
         x = self.conv_in(x)
         x = self.encoder(x)
         flow = self.decoder(x)
-        return flow  # [B, 2, H/16, W/16]
+        return flow
+
 
 # ============================================================================
 # 4. Warping & Fusion
@@ -162,6 +178,7 @@ class WarpingModule(nn.Module):
         grid = grid.permute(0, 2, 3, 1)
         return F.grid_sample(frame, grid, mode='bilinear', align_corners=True)
 
+
 class FusionModule(nn.Module):
     def __init__(self):
         super().__init__()
@@ -173,15 +190,19 @@ class FusionModule(nn.Module):
             nn.Conv2d(32, 1, 3, padding=1),
             nn.Sigmoid()
         )
-    def forward(self, warped0, warped1, frame0, frame2, flow):
-        x = torch.cat([warped0, warped1, frame0, frame2, flow], dim=1)
-        return self.fusion(x)
+
+    def forward(self, warped0, warped2, frame0, frame2, flow):
+        x = torch.cat([warped0, warped2, frame0, frame2, flow], dim=1)
+        mask = self.fusion(x)
+        avg = (warped0 + warped2) / 2
+        return mask * avg + (1 - mask) * (warped0 * (1 - flow[:, :1]) + warped2 * flow[:, :1])
+
 
 # ============================================================================
 # 5. Complete Model
 # ============================================================================
 class CNN_Attention_RIFE_Temporal(nn.Module):
-    def __init__(self, feature_dim=64):
+    def __init__(self, feature_dim=96):
         super().__init__()
         self.encoder = CNNEncoder(in_channels=1, out_channels=feature_dim)
         self.transformer = TemporalTransformer(dim=feature_dim)
@@ -193,14 +214,14 @@ class CNN_Attention_RIFE_Temporal(nn.Module):
         B, _, H, W = frame0.shape
         timestep_4d = timestep.view(B, 1, 1, 1)
 
-        f0 = self.encoder(frame0)   # [B, C, H/16, W/16]
+        f0 = self.encoder(frame0)
         f2 = self.encoder(frame2)
         f0, f2 = self.transformer(f0, f2, timestep)
 
-        flow = self.flow_net(f0, f2)   # [B, 2, H/16, W/16]
+        flow = self.flow_net(f0, f2)
 
         flow_up = F.interpolate(flow, size=(H, W), mode='bilinear', align_corners=True)
-        scale_factor = H / flow.shape[2]   # = 16
+        scale_factor = H / flow.shape[2]
         flow_up = flow_up * scale_factor
 
         warped0 = self.warper(frame0, flow_up * timestep_4d)
@@ -210,16 +231,18 @@ class CNN_Attention_RIFE_Temporal(nn.Module):
         output = self.fusion(warped0, warped2, frame0, frame2, flow_normalised)
         return output
 
+
 # ============================================================================
 # 6. Utilities (padding/cropping)
 # ============================================================================
-def pad_to_multiple_of_16(x: torch.Tensor):
+def pad_to_multiple_of_32(x: torch.Tensor):
     _, _, H, W = x.shape
-    pad_h = (16 - H % 16) % 16
-    pad_w = (16 - W % 16) % 16
+    pad_h = (32 - H % 32) % 32
+    pad_w = (32 - W % 32) % 32
     if pad_h > 0 or pad_w > 0:
         x = F.pad(x, (0, pad_w, 0, pad_h), mode='reflect')
     return x, H, W
+
 
 def crop_to_original(x: torch.Tensor, H: int, W: int) -> torch.Tensor:
     return x[:, :, :H, :W]

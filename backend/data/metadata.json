@@ -1,26 +1,5 @@
 {
   "GOES19": {
-    "2024-10-23": {
-      "id": "2024-10-23",
-      "name": "Cyclone 2024-10-23",
-      "basin": "Custom Datasets",
-      "satellite": "GOES19",
-      "available_real_frames": [
-        "01:00"
-      ],
-      "generated_frames": [],
-      "ground_truth_availability": {
-        "01:00": true
-      },
-      "generated_metadata": {},
-      "frames": [
-        {
-          "timestamp": "01:00",
-          "nc_path": "datasets/GOES19/2024-10-23/0100.nc",
-          "png_path": "datasets/GOES19/2024-10-23/0100.png"
-        }
-      ]
-    },
     "MELISSA": {
       "id": "MELISSA",
       "name": "Hurricane Melissa (2025)",
@@ -74,6 +53,27 @@
           "timestamp": "08:30",
           "nc_path": "datasets/GOES19/MELISSA/0830.nc",
           "png_path": "datasets/GOES19/MELISSA/0830.png"
+        }
+      ]
+    },
+    "2024-10-23": {
+      "id": "2024-10-23",
+      "name": "Cyclone 2024-10-23",
+      "basin": "Custom Datasets",
+      "satellite": "GOES19",
+      "available_real_frames": [
+        "01:00"
+      ],
+      "generated_frames": [],
+      "ground_truth_availability": {
+        "01:00": true
+      },
+      "generated_metadata": {},
+      "frames": [
+        {
+          "timestamp": "01:00",
+          "nc_path": "datasets/GOES19/2024-10-23/0100.nc",
+          "png_path": "datasets/GOES19/2024-10-23/0100.png"
         }
       ]
     }
