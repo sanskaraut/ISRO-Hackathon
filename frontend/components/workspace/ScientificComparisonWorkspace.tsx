@@ -4,9 +4,13 @@ import React, { useState, useRef, useEffect } from "react";
 import { 
   Info, HelpCircle, Download, ToggleRight, Sliders, Image, Activity, 
   AlertTriangle, GitCommit, Clock, Play, Pause, SkipForward, SkipBack,
-  Layers, CheckCircle2, ChevronRight, BarChart3, ShieldAlert
+  Layers, CheckCircle2, ChevronRight, BarChart3, ShieldAlert, Award, Zap
 } from "lucide-react";
 import { getApiUrl } from "@/utils/api";
+
+// ─── Model training constants (from checkpoint epoch 9) ──────────────────────
+const MODEL_BEST_VAL_SSIM  = 0.9319521307945251;
+const MODEL_BEST_VAL_EPOCH = 9;
 
 interface ScientificComparisonWorkspaceProps {
   satellite: string;
@@ -39,6 +43,20 @@ interface ScientificComparisonWorkspaceProps {
   currentTime: string;
   setCurrentTime: (time: string) => void;
   cyclone: any;
+}
+
+// ─── Metric bar helper ────────────────────────────────────────────────────────
+function MetricBar({ value, max = 1, invert = false }: { value: number; max?: number; invert?: boolean }) {
+  const pct = Math.min(1, Math.max(0, invert ? 1 - value / max : value / max));
+  const color = pct > 0.85 ? "#00f5d4" : pct > 0.6 ? "#3a86ff" : "#f59e0b";
+  return (
+    <div className="h-1 w-full bg-space-navy-800 rounded-full overflow-hidden mt-1.5">
+      <div
+        className="h-full rounded-full transition-all duration-700"
+        style={{ width: `${pct * 100}%`, backgroundColor: color }}
+      />
+    </div>
+  );
 }
 
 export default function ScientificComparisonWorkspace({
@@ -237,7 +255,6 @@ export default function ScientificComparisonWorkspace({
         bestRaw = raw;
       }
     }
-    const cleanT = bestRaw.replace(":", "");
     return getApiUrl(`/frame?satellite=${satellite}&cyclone_id=${cycloneId}&timestamp=${bestRaw}&type=raw&format=png`);
   };
 
@@ -337,19 +354,24 @@ export default function ScientificComparisonWorkspace({
     <div className="space-y-4">
       
       {/* 1. TOP CONTROL & SWITCHER HEADER */}
-      <section className="bg-space-navy-900 border border-space-navy-850 p-3 rounded-lg flex items-center justify-between gap-4 select-none">
-        <div className="flex items-center space-x-2">
-          <BarChart3 className="h-4 w-4 text-cyan-accent" />
-          <h2 className="text-xs font-mono font-bold text-white uppercase tracking-wider">
-            Compare Workspace Mode
-          </h2>
+      <section className="bg-space-navy-900 border border-space-navy-800 p-3 rounded-xl flex items-center justify-between gap-4 select-none shadow-lg">
+        <div className="flex items-center space-x-2.5">
+          <div className="h-7 w-7 rounded-lg bg-cyan-accent/10 border border-cyan-accent/30 flex items-center justify-center">
+            <BarChart3 className="h-4 w-4 text-cyan-accent" />
+          </div>
+          <div>
+            <h2 className="text-xs font-mono font-bold text-white uppercase tracking-wider">
+              Scientific Analysis Workspace
+            </h2>
+            <p className="text-[9px] font-mono text-slate-500 tracking-widest">ISRO PS-12 Evaluation Mode</p>
+          </div>
         </div>
         
-        {/* Toggle options between Single Frame vs Animation playbacks */}
-        <div className="flex bg-space-navy-950 p-0.5 rounded border border-space-navy-800 text-[10px] font-mono">
+        {/* Toggle between Single Frame vs Animation playback */}
+        <div className="flex bg-space-navy-950 p-0.5 rounded-lg border border-space-navy-800 text-[10px] font-mono">
           <button
             onClick={() => { setWorkspaceMode("single"); setIsPlaying(false); }}
-            className={`px-3 py-1 rounded font-bold transition-all cursor-pointer ${
+            className={`px-3.5 py-1.5 rounded-md font-bold transition-all cursor-pointer ${
               workspaceMode === "single"
                 ? "bg-cyan-accent text-space-navy-950 shadow-[0_0_8px_rgba(0,245,212,0.4)]"
                 : "text-slate-400 hover:text-white"
@@ -359,7 +381,7 @@ export default function ScientificComparisonWorkspace({
           </button>
           <button
             onClick={() => setWorkspaceMode("playback")}
-            className={`px-3 py-1 rounded font-bold transition-all cursor-pointer ${
+            className={`px-3.5 py-1.5 rounded-md font-bold transition-all cursor-pointer ${
               workspaceMode === "playback"
                 ? "bg-cyan-accent text-space-navy-950 shadow-[0_0_8px_rgba(0,245,212,0.4)]"
                 : "text-slate-400 hover:text-white"
@@ -384,12 +406,12 @@ export default function ScientificComparisonWorkspace({
               
               {/* Tab Selector Buttons */}
               {isFrameGenerated && (
-                <div className="flex items-center justify-between bg-space-navy-900 border border-space-navy-850 p-1.5 rounded-lg select-none">
-                  <div className="flex bg-space-navy-950 p-0.5 rounded border border-space-navy-800 text-[10px] font-mono">
+                <div className="flex items-center justify-between bg-space-navy-900 border border-space-navy-800 p-1.5 rounded-xl select-none shadow-md">
+                  <div className="flex bg-space-navy-950 p-0.5 rounded-lg border border-space-navy-800 text-[10px] font-mono">
                     {hasGroundTruth ? (
                       <button
                         onClick={() => setActiveTab("slider")}
-                        className={`px-3.5 py-1.5 rounded font-bold transition-all flex items-center space-x-1 cursor-pointer ${
+                        className={`px-3.5 py-1.5 rounded-md font-bold transition-all flex items-center space-x-1 cursor-pointer ${
                           activeTab === "slider"
                             ? "bg-cyan-accent text-space-navy-950 shadow-[0_0_8px_rgba(0,245,212,0.4)] font-black"
                             : "text-slate-400 hover:text-white"
@@ -403,7 +425,7 @@ export default function ScientificComparisonWorkspace({
                     {hasGroundTruth ? (
                       <button
                         onClick={() => setActiveTab("gt")}
-                        className={`px-3.5 py-1.5 rounded font-bold transition-all flex items-center space-x-1 cursor-pointer ${
+                        className={`px-3.5 py-1.5 rounded-md font-bold transition-all flex items-center space-x-1 cursor-pointer ${
                           activeTab === "gt"
                             ? "bg-cyan-accent text-space-navy-950 shadow-[0_0_8px_rgba(0,245,212,0.4)] font-black"
                             : "text-slate-400 hover:text-white"
@@ -416,7 +438,7 @@ export default function ScientificComparisonWorkspace({
 
                     <button
                       onClick={() => setActiveTab("ai")}
-                      className={`px-3.5 py-1.5 rounded font-bold transition-all flex items-center space-x-1 cursor-pointer ${
+                      className={`px-3.5 py-1.5 rounded-md font-bold transition-all flex items-center space-x-1 cursor-pointer ${
                         activeTab === "ai"
                           ? "bg-cyan-accent text-space-navy-950 shadow-[0_0_8px_rgba(0,245,212,0.4)] font-black"
                           : "text-slate-400 hover:text-white"
@@ -428,7 +450,7 @@ export default function ScientificComparisonWorkspace({
 
                     <button
                       onClick={() => setActiveTab("heatmap")}
-                      className={`px-3.5 py-1.5 rounded font-bold transition-all flex items-center space-x-1 cursor-pointer ${
+                      className={`px-3.5 py-1.5 rounded-md font-bold transition-all flex items-center space-x-1 cursor-pointer ${
                         activeTab === "heatmap"
                           ? "bg-cyan-accent text-space-navy-950 shadow-[0_0_8px_rgba(0,245,212,0.4)] font-black"
                           : "text-slate-400 hover:text-white"
@@ -445,7 +467,7 @@ export default function ScientificComparisonWorkspace({
                       <a
                         href={downloadGtNcUrl}
                         download
-                        className="bg-space-navy-950 hover:bg-space-navy-900 border border-space-navy-800 text-slate-300 hover:text-white px-2.5 py-1.5 rounded text-[10px] font-mono font-bold flex items-center space-x-1 transition-all cursor-pointer"
+                        className="bg-space-navy-950 hover:bg-space-navy-900 border border-space-navy-800 hover:border-slate-600 text-slate-300 hover:text-white px-2.5 py-1.5 rounded-lg text-[10px] font-mono font-bold flex items-center space-x-1 transition-all cursor-pointer"
                       >
                         <Download className="h-3 w-3" />
                         <span>Download GT</span>
@@ -455,17 +477,17 @@ export default function ScientificComparisonWorkspace({
                       <a
                         href={downloadNcUrl}
                         download
-                        className="bg-space-navy-950 hover:bg-space-navy-900 border border-space-navy-800 text-slate-300 hover:text-white px-2.5 py-1.5 rounded text-[10px] font-mono font-bold flex items-center space-x-1 transition-all cursor-pointer"
+                        className="bg-space-navy-950 hover:bg-space-navy-900 border border-space-navy-800 hover:border-slate-600 text-slate-300 hover:text-white px-2.5 py-1.5 rounded-lg text-[10px] font-mono font-bold flex items-center space-x-1 transition-all cursor-pointer"
                       >
                         <Download className="h-3 w-3" />
-                        <span>Download AI</span>
+                        <span>Download AI .nc</span>
                       </a>
                     )}
                     {activeTab === "heatmap" && !isDifferenceMapPlaceholder && downloadDiffNcUrl && (
                       <a
                         href={downloadDiffNcUrl}
                         download
-                        className="bg-space-navy-950 hover:bg-space-navy-900 border border-space-navy-800 text-slate-300 hover:text-white px-2.5 py-1.5 rounded text-[10px] font-mono font-bold flex items-center space-x-1 transition-all cursor-pointer"
+                        className="bg-space-navy-950 hover:bg-space-navy-900 border border-space-navy-800 hover:border-slate-600 text-slate-300 hover:text-white px-2.5 py-1.5 rounded-lg text-[10px] font-mono font-bold flex items-center space-x-1 transition-all cursor-pointer"
                       >
                         <Download className="h-3 w-3" />
                         <span>Download Diff</span>
@@ -476,7 +498,7 @@ export default function ScientificComparisonWorkspace({
               )}
 
               {/* View Panel Display Box */}
-              <div className="bg-space-navy-950 border border-space-navy-850 rounded-lg aspect-square md:aspect-[4/3] w-full relative overflow-hidden flex items-center justify-center select-none shadow-xl">
+              <div className="bg-space-navy-950 border border-space-navy-800 rounded-xl aspect-square md:aspect-[4/3] w-full relative overflow-hidden flex items-center justify-center select-none shadow-2xl ring-1 ring-black/20">
                 
                 {!isFrameGenerated ? (
                   rawTimestamps.includes(timestamp) ? (
@@ -487,10 +509,10 @@ export default function ScientificComparisonWorkspace({
                         className="absolute inset-0 w-full h-full object-contain pointer-events-none"
                         draggable={false}
                       />
-                      <div className="absolute top-3 left-3 bg-space-navy-950/80 border border-space-navy-800 px-2.5 py-0.5 rounded text-[8px] font-mono font-black text-white uppercase tracking-widest">
+                      <div className="absolute top-3 left-3 bg-space-navy-950/90 border border-space-navy-800 px-2.5 py-1 rounded-lg text-[8px] font-mono font-black text-white uppercase tracking-widest backdrop-blur-sm">
                         [ Original Observation (Raw) ]
                       </div>
-                      <div className="absolute bottom-3 left-3 right-3 bg-space-navy-950/90 border border-cyan-accent/30 p-2.5 rounded text-[9px] font-mono text-cyan-accent flex items-center space-x-2 backdrop-blur-sm shadow-[0_0_10px_rgba(0,245,212,0.1)]">
+                      <div className="absolute bottom-3 left-3 right-3 bg-space-navy-950/90 border border-cyan-accent/30 p-2.5 rounded-lg text-[9px] font-mono text-cyan-accent flex items-center space-x-2 backdrop-blur-sm shadow-[0_0_10px_rgba(0,245,212,0.1)]">
                         <Info className="h-4 w-4 text-cyan-accent shrink-0" />
                         <span>AI interpolation has not been executed for this timestamp. Telemetry reference is displayed.</span>
                       </div>
@@ -533,7 +555,7 @@ export default function ScientificComparisonWorkspace({
                             className="absolute inset-0 w-full h-full object-contain pointer-events-none"
                             draggable={false}
                           />
-                          <div className="absolute top-3 right-3 bg-space-navy-950/80 border border-space-navy-800 px-2 py-0.5 rounded text-[8px] font-mono font-black text-cyan-accent uppercase tracking-widest pointer-events-none">
+                          <div className="absolute top-3 right-3 bg-space-navy-950/90 border border-cyan-accent/30 px-2 py-1 rounded-lg text-[8px] font-mono font-black text-cyan-accent uppercase tracking-widest pointer-events-none backdrop-blur-sm">
                             {resolvedAiLabel}
                           </div>
 
@@ -548,15 +570,15 @@ export default function ScientificComparisonWorkspace({
                               draggable={false}
                             />
                           </div>
-                          <div className="absolute top-3 left-3 bg-space-navy-950/80 border border-space-navy-800 px-2 py-0.5 rounded text-[8px] font-mono font-black text-white uppercase tracking-widest pointer-events-none">
+                          <div className="absolute top-3 left-3 bg-space-navy-950/90 border border-space-navy-800 px-2 py-1 rounded-lg text-[8px] font-mono font-black text-white uppercase tracking-widest pointer-events-none backdrop-blur-sm">
                             [ Ground Truth ]
                           </div>
 
                           <div 
-                            className="absolute top-0 bottom-0 w-0.5 bg-cyan-accent shadow-[0_0_10px_#00f5d4] pointer-events-none"
+                            className="absolute top-0 bottom-0 w-0.5 bg-cyan-accent shadow-[0_0_12px_#00f5d4] pointer-events-none"
                             style={{ left: `${sliderPos}%` }}
                           >
-                            <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-7 h-7 bg-space-navy-950 border border-cyan-accent rounded-full flex items-center justify-center shadow-[0_0_15px_rgba(0,245,212,0.3)]">
+                            <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-8 h-8 bg-space-navy-950 border-2 border-cyan-accent rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(0,245,212,0.4)]">
                               <Sliders className="h-3.5 w-3.5 text-cyan-accent" />
                             </div>
                           </div>
@@ -573,7 +595,7 @@ export default function ScientificComparisonWorkspace({
                           className="absolute inset-0 w-full h-full object-contain pointer-events-none"
                           draggable={false}
                         />
-                        <div className="absolute top-3 left-3 bg-space-navy-950/80 border border-space-navy-800 px-2.5 py-0.5 rounded text-[8px] font-mono font-black text-white uppercase tracking-widest">
+                        <div className="absolute top-3 left-3 bg-space-navy-950/90 border border-space-navy-800 px-2.5 py-1 rounded-lg text-[8px] font-mono font-black text-white uppercase tracking-widest backdrop-blur-sm">
                           [ Ground Truth ]
                         </div>
                       </>
@@ -612,7 +634,7 @@ export default function ScientificComparisonWorkspace({
                             className="absolute inset-0 w-full h-full object-contain pointer-events-none"
                             draggable={false}
                           />
-                          <div className="absolute top-3 left-3 bg-space-navy-950/80 border border-space-navy-800 px-2.5 py-0.5 rounded text-[8px] font-mono font-black text-cyan-accent uppercase tracking-widest">
+                          <div className="absolute top-3 left-3 bg-space-navy-950/90 border border-cyan-accent/30 px-2.5 py-1 rounded-lg text-[8px] font-mono font-black text-cyan-accent uppercase tracking-widest backdrop-blur-sm">
                             {resolvedAiTabLabel}
                           </div>
                         </>
@@ -659,7 +681,7 @@ export default function ScientificComparisonWorkspace({
                             className="absolute inset-0 w-full h-full object-contain pointer-events-none"
                             draggable={false}
                           />
-                          <div className="absolute top-3 left-3 bg-space-navy-950/80 border border-space-navy-800 px-2.5 py-0.5 rounded text-[8px] font-mono font-black text-rose-400 uppercase tracking-widest">
+                          <div className="absolute top-3 left-3 bg-space-navy-950/90 border border-rose-500/30 px-2.5 py-1 rounded-lg text-[8px] font-mono font-black text-rose-400 uppercase tracking-widest backdrop-blur-sm">
                             [ Difference Map Heatmap ]
                           </div>
                         </>
@@ -681,41 +703,41 @@ export default function ScientificComparisonWorkspace({
               <div className="grid grid-cols-2 gap-4">
                 
                 {/* Left Side: Original sequence */}
-                <div className="bg-space-navy-950 border border-space-navy-850 rounded-lg aspect-square relative overflow-hidden flex items-center justify-center">
+                <div className="bg-space-navy-950 border border-space-navy-800 rounded-xl aspect-square relative overflow-hidden flex items-center justify-center shadow-xl">
                   <img 
                     src={getOriginalTelemetryUrl()} 
                     alt="Original Telemetry Sequence" 
                     className="absolute inset-0 w-full h-full object-contain pointer-events-none"
                     draggable={false}
                   />
-                  <div className="absolute top-2 left-2 bg-space-navy-950/80 border border-space-navy-800 px-2 py-0.5 rounded text-[8px] font-mono font-black text-white uppercase tracking-wider">
-                    Original Sequence (Jumping)
+                  <div className="absolute top-2 left-2 bg-space-navy-950/90 border border-space-navy-800 px-2 py-0.5 rounded-lg text-[8px] font-mono font-black text-white uppercase tracking-wider backdrop-blur-sm">
+                    Original — 30 min jumps
                   </div>
-                  <div className="absolute bottom-2 left-2 bg-space-navy-950/80 border border-space-navy-800 px-2 py-0.5 rounded text-[8px] font-mono text-slate-400">
-                    Displaying: {getOriginalTelemetryTimestamp()} UTC (Raw)
+                  <div className="absolute bottom-2 left-2 bg-space-navy-950/90 border border-space-navy-800 px-2 py-0.5 rounded-lg text-[8px] font-mono text-slate-400 backdrop-blur-sm">
+                    {getOriginalTelemetryTimestamp()} UTC (Raw)
                   </div>
                 </div>
 
                 {/* Right Side: Enhanced sequence */}
-                <div className="bg-space-navy-950 border border-space-navy-850 rounded-lg aspect-square relative overflow-hidden flex items-center justify-center">
+                <div className="bg-space-navy-950 border border-cyan-accent/20 rounded-xl aspect-square relative overflow-hidden flex items-center justify-center shadow-xl shadow-cyan-accent/5">
                   <img 
                     src={rawTimestamps.includes(currentTime) && !generatedTimestamps.includes(currentTime) ? gtImageUrl : imageUrl} 
                     alt="AI Enhanced Sequence" 
                     className="absolute inset-0 w-full h-full object-contain pointer-events-none"
                     draggable={false}
                   />
-                  <div className="absolute top-2 left-2 bg-space-navy-950/80 border border-space-navy-800 px-2 py-0.5 rounded text-[8px] font-mono font-black text-cyan-accent uppercase tracking-wider">
-                    AI Enhanced (Smooth)
+                  <div className="absolute top-2 left-2 bg-space-navy-950/90 border border-cyan-accent/30 px-2 py-0.5 rounded-lg text-[8px] font-mono font-black text-cyan-accent uppercase tracking-wider backdrop-blur-sm">
+                    AI Enhanced — Smooth
                   </div>
-                  <div className="absolute bottom-2 left-2 bg-space-navy-950/80 border border-space-navy-800 px-2 py-0.5 rounded text-[8px] font-mono text-cyan-accent">
-                    Displaying: {currentTime} UTC ({rawTimestamps.includes(currentTime) ? "Raw" : "AI"})
+                  <div className="absolute bottom-2 left-2 bg-space-navy-950/90 border border-cyan-accent/20 px-2 py-0.5 rounded-lg text-[8px] font-mono text-cyan-accent backdrop-blur-sm">
+                    {currentTime} UTC ({rawTimestamps.includes(currentTime) ? "Raw" : "AI Synthesized"})
                   </div>
                 </div>
 
               </div>
 
               {/* Synchronized Playback Control Dashboard */}
-              <div className="bg-space-navy-900 border border-space-navy-850 p-4 rounded-lg flex flex-col space-y-3 select-none">
+              <div className="bg-space-navy-900 border border-space-navy-800 p-4 rounded-xl flex flex-col space-y-3 select-none shadow-lg">
                 
                 {/* Active Slider Progress Bar */}
                 <div className="flex items-center space-x-4">
@@ -748,15 +770,15 @@ export default function ScientificComparisonWorkspace({
                   {/* Current Active Timestamp readout */}
                   <div className="flex items-center space-x-2 font-mono text-xs text-white">
                     <Clock className="h-3.5 w-3.5 text-cyan-accent" />
-                    <span>Time Step:</span>
-                    <span className="text-cyan-accent font-bold">{currentTime} UTC</span>
+                    <span className="text-slate-400">Time Step:</span>
+                    <span className="text-cyan-accent font-black">{currentTime} UTC</span>
                   </div>
 
                   {/* Play, Pause, Navigation controls */}
                   <div className="flex items-center space-x-2">
                     <button 
                       onClick={handlePrevFrame}
-                      className="bg-space-navy-950 hover:bg-space-navy-800 border border-space-navy-800 p-2 rounded text-slate-400 hover:text-white transition-all cursor-pointer"
+                      className="bg-space-navy-950 hover:bg-space-navy-800 border border-space-navy-800 hover:border-slate-600 p-2 rounded-lg text-slate-400 hover:text-white transition-all cursor-pointer"
                       title="Previous frame"
                     >
                       <SkipBack className="h-4 w-4" />
@@ -764,7 +786,7 @@ export default function ScientificComparisonWorkspace({
 
                     <button 
                       onClick={() => setIsPlaying(!isPlaying)}
-                      className="bg-cyan-accent hover:bg-cyan-accent-hover text-space-navy-950 p-2 rounded transition-all shadow-[0_0_12px_rgba(0,245,212,0.35)] cursor-pointer"
+                      className="bg-cyan-accent hover:brightness-110 text-space-navy-950 p-2.5 rounded-lg transition-all shadow-[0_0_16px_rgba(0,245,212,0.4)] cursor-pointer"
                       title={isPlaying ? "Pause Sequence" : "Play Sequence"}
                     >
                       {isPlaying ? <Pause className="h-4 w-4 fill-space-navy-950" /> : <Play className="h-4 w-4 fill-space-navy-950" />}
@@ -772,7 +794,7 @@ export default function ScientificComparisonWorkspace({
 
                     <button 
                       onClick={handleNextFrame}
-                      className="bg-space-navy-950 hover:bg-space-navy-800 border border-space-navy-800 p-2 rounded text-slate-400 hover:text-white transition-all cursor-pointer"
+                      className="bg-space-navy-950 hover:bg-space-navy-800 border border-space-navy-800 hover:border-slate-600 p-2 rounded-lg text-slate-400 hover:text-white transition-all cursor-pointer"
                       title="Next frame"
                     >
                       <SkipForward className="h-4 w-4" />
@@ -780,7 +802,7 @@ export default function ScientificComparisonWorkspace({
                   </div>
 
                   {/* Playback mode filter */}
-                  <div className="flex bg-space-navy-950 p-0.5 rounded border border-space-navy-800 text-[9px] font-mono select-none">
+                  <div className="flex bg-space-navy-950 p-0.5 rounded-lg border border-space-navy-800 text-[9px] font-mono select-none">
                     <button
                       onClick={() => {
                         setPlaybackSequence("raw");
@@ -788,7 +810,7 @@ export default function ScientificComparisonWorkspace({
                           setCurrentTime(rawTimestamps[0]);
                         }
                       }}
-                      className={`px-2.5 py-1 rounded font-bold transition-all cursor-pointer ${
+                      className={`px-2.5 py-1 rounded-md font-bold transition-all cursor-pointer ${
                         playbackSequence === "raw"
                           ? "bg-cyan-accent text-space-navy-950"
                           : "text-slate-400 hover:text-white"
@@ -799,7 +821,7 @@ export default function ScientificComparisonWorkspace({
                     </button>
                     <button
                       onClick={() => setPlaybackSequence("all")}
-                      className={`px-2.5 py-1 rounded font-bold transition-all cursor-pointer ${
+                      className={`px-2.5 py-1 rounded-md font-bold transition-all cursor-pointer ${
                         playbackSequence === "all"
                           ? "bg-cyan-accent text-space-navy-950"
                           : "text-slate-400 hover:text-white"
@@ -811,12 +833,12 @@ export default function ScientificComparisonWorkspace({
                   </div>
 
                   {/* Playback speed selector multipliers */}
-                  <div className="flex bg-space-navy-950 p-0.5 rounded border border-space-navy-800 text-[9px] font-mono select-none">
+                  <div className="flex bg-space-navy-950 p-0.5 rounded-lg border border-space-navy-800 text-[9px] font-mono select-none">
                     {([0.5, 1, 2] as const).map((spd) => (
                       <button
                         key={spd}
                         onClick={() => setPlaybackSpeed(spd)}
-                        className={`px-2.5 py-1 rounded font-bold transition-all cursor-pointer ${
+                        className={`px-2.5 py-1 rounded-md font-bold transition-all cursor-pointer ${
                           playbackSpeed === spd
                             ? "bg-cyan-accent text-space-navy-950"
                             : "text-slate-400 hover:text-white"
@@ -840,9 +862,12 @@ export default function ScientificComparisonWorkspace({
         <div className="lg:col-span-4 flex flex-col space-y-4">
           
           {/* A. Validation Status Panel Card */}
-          <div className="bg-space-navy-900 border border-space-navy-850 p-4 rounded-lg flex flex-col space-y-3 select-none">
-            <div className="text-[9px] font-mono text-cyan-accent uppercase tracking-widest font-black border-b border-space-navy-850 pb-2">
-              [ VALIDATION STATUS ]
+          <div className="bg-space-navy-900 border border-space-navy-800 p-4 rounded-xl flex flex-col space-y-3 select-none shadow-lg">
+            <div className="flex items-center space-x-2 border-b border-space-navy-800 pb-2.5">
+              <div className={`h-2 w-2 rounded-full ${hasGroundTruth ? "bg-emerald-400 shadow-[0_0_6px_#34d399]" : "bg-amber-400 shadow-[0_0_6px_#fbbf24]"}`} />
+              <span className="text-[9px] font-mono text-slate-400 uppercase tracking-widest font-black">
+                Frame Metadata
+              </span>
             </div>
 
             <div className="grid grid-cols-2 gap-y-2.5 gap-x-4 text-[10px] font-mono">
@@ -851,10 +876,7 @@ export default function ScientificComparisonWorkspace({
                 {hasGroundTruth ? "✓ Available" : "⚠ Not Available"}
               </span>
 
-              <span className="text-slate-500">Ref Time:</span>
-              <span className="text-slate-300 text-right">{hasGroundTruth ? `${timestamp} UTC` : "N/A"}</span>
-
-              <span className="text-slate-500">Gen Time:</span>
+              <span className="text-slate-500">Generated At:</span>
               <span className="text-cyan-accent text-right font-bold">{timestamp} UTC</span>
 
               <span className="text-slate-500">Parents:</span>
@@ -864,14 +886,14 @@ export default function ScientificComparisonWorkspace({
 
               <span className="text-slate-500">Depth:</span>
               <span className="text-slate-300 text-right">
-                {parentA && parentB ? `Depth ${interpolationDepth}` : "N/A"}
+                {parentA && parentB ? `Level ${interpolationDepth}` : "N/A"}
               </span>
 
               <span className="text-slate-500">Resolution:</span>
               <span className="text-slate-300 text-right">{temporalResolution}</span>
 
-              <span className="text-slate-500">Model Version:</span>
-              <span className="text-slate-300 text-right font-semibold">{resolvedModelVersion}</span>
+              <span className="text-slate-500">Model:</span>
+              <span className="text-slate-300 text-right font-semibold truncate" title={resolvedModelVersion}>{resolvedModelVersion}</span>
 
               <span className="text-slate-500">Inference:</span>
               <span className="text-slate-300 text-right">
@@ -881,154 +903,217 @@ export default function ScientificComparisonWorkspace({
           </div>
 
           {/* B. Scientific Metrics Panel Card */}
-          <div className="bg-space-navy-900 border border-space-navy-850 p-4 rounded-lg flex flex-col space-y-3 grow">
+          <div className="bg-space-navy-900 border border-space-navy-800 p-4 rounded-xl flex flex-col space-y-3 grow shadow-lg">
             
-            <div className="flex items-center justify-between border-b border-space-navy-850 pb-2">
-              <span className="text-[9px] font-mono text-cyan-accent uppercase tracking-widest font-black">
-                [ QUALITY METRICS ]
-              </span>
-              <span className="text-[8px] font-mono text-slate-500 uppercase">
-                ISRO PS-12 EVAL
+            <div className="flex items-center justify-between border-b border-space-navy-800 pb-2.5">
+              <div className="flex items-center space-x-2">
+                <div className="h-6 w-6 rounded-md bg-cyan-accent/10 border border-cyan-accent/20 flex items-center justify-center">
+                  <BarChart3 className="h-3.5 w-3.5 text-cyan-accent" />
+                </div>
+                <span className="text-[9px] font-mono text-white uppercase tracking-widest font-black">
+                  Quality Metrics
+                </span>
+              </div>
+              <span className="text-[8px] font-mono text-slate-500 uppercase bg-space-navy-950 border border-space-navy-800 px-1.5 py-0.5 rounded">
+                ISRO PS-12
               </span>
             </div>
 
-            {!hasGroundTruth ? (
-              <div className="bg-amber-500/5 border border-amber-500/20 p-3.5 rounded text-amber-400 space-y-1.5 select-none my-1">
-                <div className="flex items-center space-x-1 font-bold">
-                  <ShieldAlert className="h-4 w-4 shrink-0" />
-                  <span className="text-[10px] font-heading uppercase tracking-wide">GT Unavailable</span>
+            {/* ─── NO GROUND TRUTH: Show Model Best Validation SSIM ─────────── */}
+            {!hasGroundTruth && isFrameGenerated && (
+              <div className="space-y-3">
+                {/* Banner explaining the situation */}
+                <div className="bg-amber-500/8 border border-amber-500/25 rounded-xl p-3 space-y-1.5">
+                  <div className="flex items-center space-x-1.5">
+                    <ShieldAlert className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                    <span className="text-[9px] font-mono font-black text-amber-300 uppercase tracking-wide">
+                      No Ground Truth Reference
+                    </span>
+                  </div>
+                  <p className="text-[9px] font-mono text-slate-400 leading-relaxed">
+                    This timestamp exceeds satellite native resolution — no real observation exists to compare against. Per-frame SSIM/PSNR cannot be computed.
+                  </p>
                 </div>
-                <p className="text-[9px] font-mono leading-relaxed text-slate-300">
-                  Metrics unavailable for this frame. This frame exceeds the native temporal resolution of the satellite.
-                </p>
-              </div>
-            ) : (
-              <div className="text-[10px] text-slate-400 leading-normal mb-1">
-                Acquired validation metrics comparing AI synthesis with reference observation:
+
+                {/* Best Validation SSIM highlight card */}
+                <div className="bg-gradient-to-br from-cyan-accent/8 to-electric-blue/5 border border-cyan-accent/30 rounded-xl p-3.5 space-y-2.5 relative overflow-hidden">
+                  {/* Glow accent */}
+                  <div className="absolute top-0 right-0 w-16 h-16 bg-cyan-accent/5 rounded-full blur-2xl pointer-events-none" />
+                  
+                  <div className="flex items-center space-x-2">
+                    <div className="h-6 w-6 rounded-lg bg-cyan-accent/15 border border-cyan-accent/30 flex items-center justify-center">
+                      <Award className="h-3.5 w-3.5 text-cyan-accent" />
+                    </div>
+                    <div>
+                      <span className="text-[8px] font-mono text-cyan-accent uppercase tracking-widest font-black block">
+                        Best Validation Score
+                      </span>
+                      <span className="text-[7px] font-mono text-slate-500 uppercase tracking-wider">
+                        Epoch {MODEL_BEST_VAL_EPOCH} · Hold-out Validation Set
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-end justify-between">
+                    <div>
+                      <span className="text-2xl font-heading font-black text-cyan-accent tracking-tight">
+                        {MODEL_BEST_VAL_SSIM.toFixed(4)}
+                      </span>
+                      <span className="text-[9px] font-mono text-slate-400 ml-1.5">SSIM</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[8px] font-mono text-emerald-400 block font-bold">≈ 93.2%</span>
+                      <span className="text-[7px] font-mono text-slate-500">structural accuracy</span>
+                    </div>
+                  </div>
+
+                  <MetricBar value={MODEL_BEST_VAL_SSIM} max={1} />
+
+                  <div className="bg-space-navy-900/70 border border-space-navy-800 rounded-lg p-2 mt-1">
+                    <p className="text-[8px] font-mono text-slate-400 leading-relaxed">
+                      <span className="text-white font-black">Note:</span> This is the model's best SSIM achieved on the validation dataset during training. It reflects generalisation performance — not this specific frame's quality, which cannot be measured without a ground truth reference.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Other metrics shown as N/A with explanation */}
+                <div className="grid grid-cols-2 gap-2">
+                  {(["PSNR", "MSE", "FSIM"] as const).map((m) => (
+                    <div key={m} className="bg-space-navy-950 border border-space-navy-800 p-2 rounded-lg text-center">
+                      <span className="text-[8px] font-mono text-slate-600 uppercase tracking-wider block mb-0.5">{m}</span>
+                      <span className="text-[10px] font-mono text-slate-700 font-bold">N/A</span>
+                    </div>
+                  ))}
+                  <div className="bg-space-navy-950/60 border border-dashed border-space-navy-800 p-2 rounded-lg text-center flex items-center justify-center">
+                    <span className="text-[7px] font-mono text-slate-600 leading-tight text-center">Requires<br/>GT ref.</span>
+                  </div>
+                </div>
               </div>
             )}
 
-            {/* Metrics List */}
-            <div className="grid grid-cols-2 gap-3">
-              
-              {/* SSIM */}
-              <div className="bg-space-navy-950 border border-space-navy-800 p-2.5 rounded group relative select-none">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[9px] font-mono text-slate-400 font-bold uppercase tracking-wider">
-                    SSIM
-                  </span>
-                  <HelpCircle className="h-3 w-3 text-slate-500 hover:text-cyan-accent cursor-help" />
-                  {/* Tooltip Popup */}
-                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 hidden group-hover:block bg-black/95 border border-space-navy-800 text-[9px] text-slate-300 p-2.5 rounded shadow-xl z-20 font-sans pointer-events-none leading-relaxed">
-                    <strong className="text-white uppercase block mb-1">{metricConfigs.ssim.fullName}</strong>
-                    <p className="mb-1">{metricConfigs.ssim.desc}</p>
-                    <p className="text-emerald-400 mb-1"><strong>Range:</strong> {metricConfigs.ssim.range}</p>
-                    <p className="text-cyan-accent"><strong>Why it matters:</strong> {metricConfigs.ssim.matters}</p>
+            {/* ─── HAS GROUND TRUTH: Show actual computed metrics ────────────── */}
+            {hasGroundTruth && (
+              <>
+                {metrics ? (
+                  <div className="text-[9px] text-slate-400 font-mono leading-normal">
+                    Live metrics — AI synthesis vs. actual satellite observation:
                   </div>
+                ) : (
+                  <div className="text-[9px] text-slate-500 font-mono leading-normal">
+                    Ground truth available. Run interpolation to compute metrics.
+                  </div>
+                )}
+
+                {/* Metrics Grid */}
+                <div className="grid grid-cols-2 gap-2.5">
+                  
+                  {/* SSIM */}
+                  <div className="bg-space-navy-950 border border-space-navy-800 hover:border-cyan-accent/30 p-3 rounded-xl group relative select-none transition-colors">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[9px] font-mono text-slate-400 font-bold uppercase tracking-wider">SSIM</span>
+                      <HelpCircle className="h-3 w-3 text-slate-600 hover:text-cyan-accent cursor-help" />
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 hidden group-hover:block bg-black/95 border border-space-navy-800 text-[9px] text-slate-300 p-2.5 rounded-xl shadow-2xl z-20 font-sans pointer-events-none leading-relaxed">
+                        <strong className="text-white uppercase block mb-1">{metricConfigs.ssim.fullName}</strong>
+                        <p className="mb-1">{metricConfigs.ssim.desc}</p>
+                        <p className="text-emerald-400 mb-1"><strong>Range:</strong> {metricConfigs.ssim.range}</p>
+                        <p className="text-cyan-accent"><strong>Why it matters:</strong> {metricConfigs.ssim.matters}</p>
+                      </div>
+                    </div>
+                    <span className="text-lg font-heading font-black text-white">
+                      {metrics ? metrics.ssim.toFixed(4) : <span className="text-slate-600 text-[10px] font-mono font-normal">—</span>}
+                    </span>
+                    {metrics && <MetricBar value={metrics.ssim} />}
+                  </div>
+
+                  {/* PSNR */}
+                  <div className="bg-space-navy-950 border border-space-navy-800 hover:border-cyan-accent/30 p-3 rounded-xl group relative select-none transition-colors">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[9px] font-mono text-slate-400 font-bold uppercase tracking-wider">PSNR</span>
+                      <HelpCircle className="h-3 w-3 text-slate-600 hover:text-cyan-accent cursor-help" />
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 hidden group-hover:block bg-black/95 border border-space-navy-800 text-[9px] text-slate-300 p-2.5 rounded-xl shadow-2xl z-20 font-sans pointer-events-none leading-relaxed">
+                        <strong className="text-white uppercase block mb-1">{metricConfigs.psnr.fullName}</strong>
+                        <p className="mb-1">{metricConfigs.psnr.desc}</p>
+                        <p className="text-emerald-400 mb-1"><strong>Range:</strong> {metricConfigs.psnr.range}</p>
+                        <p className="text-cyan-accent"><strong>Why it matters:</strong> {metricConfigs.psnr.matters}</p>
+                      </div>
+                    </div>
+                    <span className="text-lg font-heading font-black text-white">
+                      {metrics ? `${metrics.psnr.toFixed(2)} dB` : <span className="text-slate-600 text-[10px] font-mono font-normal">—</span>}
+                    </span>
+                    {metrics && <MetricBar value={Math.min(metrics.psnr / 45, 1)} />}
+                  </div>
+
+                  {/* MSE */}
+                  <div className="bg-space-navy-950 border border-space-navy-800 hover:border-cyan-accent/30 p-3 rounded-xl group relative select-none transition-colors">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[9px] font-mono text-slate-400 font-bold uppercase tracking-wider">MSE</span>
+                      <HelpCircle className="h-3 w-3 text-slate-600 hover:text-cyan-accent cursor-help" />
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 hidden group-hover:block bg-black/95 border border-space-navy-800 text-[9px] text-slate-300 p-2.5 rounded-xl shadow-2xl z-20 font-sans pointer-events-none leading-relaxed">
+                        <strong className="text-white uppercase block mb-1">{metricConfigs.mse.fullName}</strong>
+                        <p className="mb-1">{metricConfigs.mse.desc}</p>
+                        <p className="text-emerald-400 mb-1"><strong>Range:</strong> {metricConfigs.mse.range}</p>
+                        <p className="text-cyan-accent"><strong>Why it matters:</strong> {metricConfigs.mse.matters}</p>
+                      </div>
+                    </div>
+                    <span className="text-lg font-heading font-black text-white">
+                      {metrics ? metrics.mse.toFixed(2) : <span className="text-slate-600 text-[10px] font-mono font-normal">—</span>}
+                    </span>
+                    {metrics && <MetricBar value={1 - Math.min(metrics.mse / 100, 1)} />}
+                  </div>
+
+                  {/* FSIM */}
+                  <div className="bg-space-navy-950 border border-space-navy-800 hover:border-cyan-accent/30 p-3 rounded-xl group relative select-none transition-colors">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[9px] font-mono text-slate-400 font-bold uppercase tracking-wider">FSIM</span>
+                      <HelpCircle className="h-3 w-3 text-slate-600 hover:text-cyan-accent cursor-help" />
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 hidden group-hover:block bg-black/95 border border-space-navy-800 text-[9px] text-slate-300 p-2.5 rounded-xl shadow-2xl z-20 font-sans pointer-events-none leading-relaxed">
+                        <strong className="text-white uppercase block mb-1">{metricConfigs.fsim.fullName}</strong>
+                        <p className="mb-1">{metricConfigs.fsim.desc}</p>
+                        <p className="text-emerald-400 mb-1"><strong>Range:</strong> {metricConfigs.fsim.range}</p>
+                        <p className="text-cyan-accent"><strong>Why it matters:</strong> {metricConfigs.fsim.matters}</p>
+                      </div>
+                    </div>
+                    <span className="text-lg font-heading font-black text-white">
+                      {metrics ? metrics.fsim.toFixed(4) : <span className="text-slate-600 text-[10px] font-mono font-normal">—</span>}
+                    </span>
+                    {metrics && <MetricBar value={metrics.fsim} />}
+                  </div>
+
                 </div>
-                <span className="text-sm font-heading font-black text-white">
-                  {!hasGroundTruth || !metrics ? (
-                    <span className="text-slate-600 text-[10px] font-mono font-normal">N/A</span>
-                  ) : (
-                    metrics.ssim.toFixed(4)
-                  )}
+              </>
+            )}
+
+            {/* Raw frame — no metrics needed */}
+            {!isFrameGenerated && rawTimestamps.includes(timestamp) && (
+              <div className="flex flex-col items-center justify-center text-center py-4 space-y-2 select-none">
+                <CheckCircle2 className="h-7 w-7 text-emerald-400" />
+                <span className="text-[9px] font-mono text-slate-400 uppercase tracking-wider">
+                  Native Satellite Observation
+                </span>
+                <span className="text-[8px] font-mono text-slate-600">
+                  No synthesis performed — metrics N/A
                 </span>
               </div>
-
-              {/* PSNR */}
-              <div className="bg-space-navy-950 border border-space-navy-800 p-2.5 rounded group relative select-none">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[9px] font-mono text-slate-400 font-bold uppercase tracking-wider">
-                    PSNR
-                  </span>
-                  <HelpCircle className="h-3 w-3 text-slate-500 hover:text-cyan-accent cursor-help" />
-                  {/* Tooltip Popup */}
-                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 hidden group-hover:block bg-black/95 border border-space-navy-800 text-[9px] text-slate-300 p-2.5 rounded shadow-xl z-20 font-sans pointer-events-none leading-relaxed">
-                    <strong className="text-white uppercase block mb-1">{metricConfigs.psnr.fullName}</strong>
-                    <p className="mb-1">{metricConfigs.psnr.desc}</p>
-                    <p className="text-emerald-400 mb-1"><strong>Range:</strong> {metricConfigs.psnr.range}</p>
-                    <p className="text-cyan-accent"><strong>Why it matters:</strong> {metricConfigs.psnr.matters}</p>
-                  </div>
-                </div>
-                <span className="text-sm font-heading font-black text-white">
-                  {!hasGroundTruth || !metrics ? (
-                    <span className="text-slate-600 text-[10px] font-mono font-normal">N/A</span>
-                  ) : (
-                    `${metrics.psnr.toFixed(2)} dB`
-                  )}
-                </span>
-              </div>
-
-              {/* MSE */}
-              <div className="bg-space-navy-950 border border-space-navy-800 p-2.5 rounded group relative select-none">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[9px] font-mono text-slate-400 font-bold uppercase tracking-wider">
-                    MSE
-                  </span>
-                  <HelpCircle className="h-3 w-3 text-slate-500 hover:text-cyan-accent cursor-help" />
-                  {/* Tooltip Popup */}
-                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 hidden group-hover:block bg-black/95 border border-space-navy-800 text-[9px] text-slate-300 p-2.5 rounded shadow-xl z-20 font-sans pointer-events-none leading-relaxed">
-                    <strong className="text-white uppercase block mb-1">{metricConfigs.mse.fullName}</strong>
-                    <p className="mb-1">{metricConfigs.mse.desc}</p>
-                    <p className="text-emerald-400 mb-1"><strong>Range:</strong> {metricConfigs.mse.range}</p>
-                    <p className="text-cyan-accent"><strong>Why it matters:</strong> {metricConfigs.mse.matters}</p>
-                  </div>
-                </div>
-                <span className="text-sm font-heading font-black text-white">
-                  {!hasGroundTruth || !metrics ? (
-                    <span className="text-slate-600 text-[10px] font-mono font-normal">N/A</span>
-                  ) : (
-                    metrics.mse.toFixed(2)
-                  )}
-                </span>
-              </div>
-
-              {/* FSIM */}
-              <div className="bg-space-navy-950 border border-space-navy-800 p-2.5 rounded group relative select-none">
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[9px] font-mono text-slate-400 font-bold uppercase tracking-wider">
-                    FSIM
-                  </span>
-                  <HelpCircle className="h-3 w-3 text-slate-500 hover:text-cyan-accent cursor-help" />
-                  {/* Tooltip Popup */}
-                  <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-52 hidden group-hover:block bg-black/95 border border-space-navy-800 text-[9px] text-slate-300 p-2.5 rounded shadow-xl z-20 font-sans pointer-events-none leading-relaxed">
-                    <strong className="text-white uppercase block mb-1">{metricConfigs.fsim.fullName}</strong>
-                    <p className="mb-1">{metricConfigs.fsim.desc}</p>
-                    <p className="text-emerald-400 mb-1"><strong>Range:</strong> {metricConfigs.fsim.range}</p>
-                    <p className="text-cyan-accent"><strong>Why it matters:</strong> {metricConfigs.fsim.matters}</p>
-                  </div>
-                </div>
-                <span className="text-sm font-heading font-black text-white">
-                  {!hasGroundTruth || !metrics ? (
-                    <span className="text-slate-600 text-[10px] font-mono font-normal">N/A</span>
-                  ) : (
-                    metrics.fsim.toFixed(4)
-                  )}
-                </span>
-              </div>
-
-            </div>
+            )}
 
             {/* Pipeline Workflow Summary Card */}
-            <div className="border-t border-space-navy-850 pt-3.5 mt-2 space-y-2">
-              <span className="text-[8px] font-mono text-slate-500 uppercase tracking-widest block select-none">
-                [ PIPELINE WORKFLOW ]
+            <div className="border-t border-space-navy-800 pt-3 mt-auto space-y-2">
+              <span className="text-[8px] font-mono text-slate-600 uppercase tracking-widest block select-none">
+                [ Pipeline Flow ]
               </span>
-              <div className="bg-space-navy-950 border border-space-navy-800 p-2 rounded flex items-center justify-between text-[7px] font-mono text-slate-400 uppercase select-none">
-                <span>Input NC</span>
-                <ChevronRight className="h-2 w-2 text-cyan-accent" />
-                <span>Optical Flow</span>
-                <ChevronRight className="h-2 w-2 text-cyan-accent" />
-                <span>RIFE</span>
-                <ChevronRight className="h-2 w-2 text-cyan-accent" />
-                <span>Generated NC</span>
-                <ChevronRight className="h-2 w-2 text-cyan-accent" />
-                <span>Validation</span>
-                <ChevronRight className="h-2 w-2 text-cyan-accent" />
-                <span>Visual</span>
+              <div className="bg-space-navy-950 border border-space-navy-800 p-2 rounded-lg flex items-center justify-between text-[7px] font-mono text-slate-500 uppercase select-none">
+                <span>NetCDF</span>
+                <ChevronRight className="h-2 w-2 text-cyan-accent/60" />
+                <span>Flow Net</span>
+                <ChevronRight className="h-2 w-2 text-cyan-accent/60" />
+                <span>RIFE Warp</span>
+                <ChevronRight className="h-2 w-2 text-cyan-accent/60" />
+                <span>Fusion</span>
+                <ChevronRight className="h-2 w-2 text-cyan-accent/60" />
+                <span>Output NC</span>
               </div>
             </div>
-
+            
           </div>
 
         </div>
@@ -1036,55 +1121,67 @@ export default function ScientificComparisonWorkspace({
       </div>
 
       {/* 3. VALIDATION SUMMARY (Bottom Panel) */}
-      <section className="bg-space-navy-900 border border-space-navy-850 p-5 rounded-lg select-none">
-        <div className="text-[9px] font-mono text-cyan-accent uppercase tracking-widest font-black border-b border-space-navy-850 pb-2 mb-4">
-          [ DATASET VALIDATION SUMMARY ]
+      <section className="bg-space-navy-900 border border-space-navy-800 p-5 rounded-xl select-none shadow-lg">
+        <div className="flex items-center justify-between border-b border-space-navy-800 pb-3 mb-4">
+          <div className="flex items-center space-x-2">
+            <Zap className="h-4 w-4 text-cyan-accent" />
+            <span className="text-[9px] font-mono text-white uppercase tracking-widest font-black">
+              Dataset Validation Summary
+            </span>
+          </div>
+          <span className="text-[8px] font-mono text-slate-600 uppercase bg-space-navy-950 border border-space-navy-800 px-2 py-0.5 rounded-md">
+            Epoch {MODEL_BEST_VAL_EPOCH} · Best Checkpoint
+          </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 lg:grid-cols-7 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
           
-          <div className="bg-space-navy-950 border border-space-navy-800 p-3 rounded">
-            <span className="text-[8px] font-mono text-slate-500 uppercase tracking-wider block mb-1">Generated Frames</span>
-            <span className="text-base font-heading font-black text-white">{statsSummary.totalGenerated}</span>
+          <div className="bg-space-navy-950 border border-space-navy-800 p-3 rounded-xl">
+            <span className="text-[8px] font-mono text-slate-500 uppercase tracking-wider block mb-1">Generated</span>
+            <span className="text-xl font-heading font-black text-white">{statsSummary.totalGenerated}</span>
+            <span className="text-[7px] font-mono text-slate-600 block">frames</span>
           </div>
 
-          <div className="bg-space-navy-950 border border-space-navy-800 p-3 rounded">
-            <span className="text-[8px] font-mono text-slate-500 uppercase tracking-wider block mb-1">Validated Frames</span>
-            <span className="text-base font-heading font-black text-cyan-accent">{statsSummary.totalValidated}</span>
+          <div className="bg-space-navy-950 border border-cyan-accent/20 p-3 rounded-xl">
+            <span className="text-[8px] font-mono text-slate-500 uppercase tracking-wider block mb-1">Validated</span>
+            <span className="text-xl font-heading font-black text-cyan-accent">{statsSummary.totalValidated}</span>
+            <span className="text-[7px] font-mono text-slate-600 block">with GT ref</span>
+          </div>
+
+          {/* Always show model best val SSIM */}
+          <div className="bg-gradient-to-br from-cyan-accent/8 to-transparent border border-cyan-accent/25 p-3 rounded-xl">
+            <span className="text-[8px] font-mono text-cyan-accent uppercase tracking-wider block mb-1 font-bold">Best Val SSIM</span>
+            <span className="text-xl font-heading font-black text-cyan-accent">{MODEL_BEST_VAL_SSIM.toFixed(4)}</span>
+            <span className="text-[7px] font-mono text-slate-500 block">epoch {MODEL_BEST_VAL_EPOCH}</span>
           </div>
 
           {statsSummary.eligible ? (
             <>
-              <div className="bg-space-navy-950 border border-space-navy-800 p-3 rounded">
-                <span className="text-[8px] font-mono text-slate-500 uppercase tracking-wider block mb-1">Average SSIM</span>
-                <span className="text-base font-heading font-black text-white">{statsSummary.avgSsim!.toFixed(4)}</span>
+              <div className="bg-space-navy-950 border border-space-navy-800 p-3 rounded-xl">
+                <span className="text-[8px] font-mono text-slate-500 uppercase tracking-wider block mb-1">Avg SSIM</span>
+                <span className="text-xl font-heading font-black text-white">{statsSummary.avgSsim!.toFixed(4)}</span>
               </div>
 
-              <div className="bg-space-navy-950 border border-space-navy-800 p-3 rounded">
-                <span className="text-[8px] font-mono text-slate-500 uppercase tracking-wider block mb-1">Average PSNR</span>
-                <span className="text-base font-heading font-black text-white">{statsSummary.avgPsnr!.toFixed(2)} dB</span>
+              <div className="bg-space-navy-950 border border-space-navy-800 p-3 rounded-xl">
+                <span className="text-[8px] font-mono text-slate-500 uppercase tracking-wider block mb-1">Avg PSNR</span>
+                <span className="text-xl font-heading font-black text-white">{statsSummary.avgPsnr!.toFixed(2)} dB</span>
               </div>
 
-              <div className="bg-space-navy-950 border border-space-navy-800 p-3 rounded">
-                <span className="text-[8px] font-mono text-slate-500 uppercase tracking-wider block mb-1">Average MSE</span>
-                <span className="text-base font-heading font-black text-white">{statsSummary.avgMse!.toFixed(2)}</span>
+              <div className="bg-space-navy-950 border border-space-navy-800 p-3 rounded-xl">
+                <span className="text-[8px] font-mono text-slate-500 uppercase tracking-wider block mb-1">Avg FSIM</span>
+                <span className="text-xl font-heading font-black text-white">{statsSummary.avgFsim!.toFixed(4)}</span>
               </div>
 
-              <div className="bg-space-navy-950 border border-space-navy-800 p-3 rounded">
-                <span className="text-[8px] font-mono text-slate-500 uppercase tracking-wider block mb-1">Average FSIM</span>
-                <span className="text-base font-heading font-black text-white">{statsSummary.avgFsim!.toFixed(4)}</span>
-              </div>
-
-              <div className="bg-space-navy-950 border border-space-navy-800 p-3 rounded">
+              <div className="bg-space-navy-950 border border-space-navy-800 p-3 rounded-xl">
                 <span className="text-[8px] font-mono text-slate-500 uppercase tracking-wider block mb-1">Avg Inference</span>
-                <span className="text-base font-heading font-black text-slate-300">
-                  {statsSummary.avgInf! === 0 ? "Cached" : `${statsSummary.avgInf!.toFixed(1)} ms`}
+                <span className="text-xl font-heading font-black text-slate-300">
+                  {statsSummary.avgInf! === 0 ? "Cached" : `${statsSummary.avgInf!.toFixed(0)} ms`}
                 </span>
               </div>
             </>
           ) : (
-            <div className="md:col-span-2 lg:col-span-5 bg-space-navy-950/65 border border-dashed border-space-navy-800 p-3.5 rounded flex items-center justify-center text-[10px] font-mono text-slate-500 uppercase tracking-wider italic text-center leading-normal">
-              Dataset summary requires additional validated observations.
+            <div className="md:col-span-1 lg:col-span-4 bg-space-navy-950/60 border border-dashed border-space-navy-800 p-3 rounded-xl flex items-center justify-center text-[9px] font-mono text-slate-600 uppercase tracking-wider text-center leading-relaxed">
+              Generate & validate more frames to unlock session-level statistics
             </div>
           )}
 

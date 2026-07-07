@@ -19,7 +19,8 @@ import {
   Server,
   Database,
   LineChart,
-  ChevronDown
+  ChevronDown,
+  Users
 } from "lucide-react";
 
 import Button from "@/components/ui/Button";
@@ -152,7 +153,7 @@ export default function LandingPage() {
         {/* Scroll Indicator */}
         <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex flex-col items-center space-y-1.5 text-slate-500 hover:text-cyan-accent transition-colors duration-300">
           <span className="font-mono text-[9px] uppercase tracking-widest cursor-pointer" onClick={scrollToNext}>
-            SCROLL TO DEPLOY
+            EXPLORE THE PROJECT ↓
           </span>
           <motion.div
             animate={{ y: [0, 5, 0] }}
@@ -544,6 +545,11 @@ export default function LandingPage() {
               <Link href="/explorer">
                 <Button variant="outline" size="lg" icon={Compass}>
                   Explore Datasets
+                </Button>
+              </Link>
+              <Link href="/about">
+                <Button variant="outline" size="lg" icon={Users}>
+                  About the Team
                 </Button>
               </Link>
             </div>

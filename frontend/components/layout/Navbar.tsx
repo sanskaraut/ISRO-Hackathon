@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Satellite, Compass, Cpu, Menu, X, Globe } from "lucide-react";
+import { Satellite, Compass, Cpu, Menu, X, Globe, Users } from "lucide-react";
 
 const Github = (props: React.SVGProps<SVGSVGElement>) => (
   <svg
@@ -25,7 +25,7 @@ const NAV_LINKS = [
   { href: "/", label: "Home", icon: Globe },
   { href: "/demo", label: "Demo", icon: Cpu },
   { href: "/explorer", label: "Cyclone Explorer", icon: Compass },
-  { href: "/about", label: "About Model", icon: Satellite },
+  { href: "/about", label: "About Us", icon: Users },
 ];
 
 export default function Navbar() {
@@ -82,7 +82,7 @@ export default function Navbar() {
           {/* Right Action Button & GitHub link */}
           <div className="hidden md:flex items-center space-x-4">
             <a
-              href="https://github.com"
+              href="https://github.com/sanskaraut/ISRO-Hackathon"
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center justify-center h-9 w-9 rounded-lg border border-space-navy-800 bg-space-navy-900 text-slate-400 hover:text-white hover:border-slate-500 transition-all duration-300"
@@ -143,7 +143,7 @@ export default function Navbar() {
               })}
               <div className="border-t border-space-navy-800 pt-4 mt-4 flex items-center justify-between px-3">
                 <a
-                  href="https://github.com"
+                  href="https://github.com/sanskaraut/ISRO-Hackathon"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="flex items-center space-x-2 text-slate-400 hover:text-white"

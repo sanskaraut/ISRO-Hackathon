@@ -23,7 +23,8 @@ import {
   Clock,
   Gauge,
   HelpCircle,
-  Upload
+  Upload,
+  Info
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -488,6 +489,13 @@ export default function DemoPage() {
 
   const hasBoth = rawTimestamps.includes(currentTime) && (generatedFrames[currentTime] || (cyclone?.generated_frames && cyclone.generated_frames.includes(currentTime)));
 
+  // Derive effectively-interpolated from both in-session state AND backend-loaded generated_frames
+  const effectivelyInterpolated = isInterpolated ||
+    !!(cyclone?.generated_frames && cyclone.generated_frames.length > 0) ||
+    Object.keys(generatedFrames).length > 0;
+
+  const anyGeneratedFrames = generatedTimestamps.length > 0;
+
   // Helper zoom trigger
   const triggerZoom = (url: string | null, title: string) => {
     if (!url) return;
@@ -694,8 +702,8 @@ export default function DemoPage() {
             <ArrowRight className="h-3 w-3 text-slate-600" />
 
             <div className={`flex items-center px-2 py-0.5 rounded border transition-colors ${
-              !isGenerating 
-                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" 
+              !isGenerating && effectivelyInterpolated
+                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 font-bold" 
                 : "bg-space-navy-950 border-space-navy-800 text-slate-400"
             }`}>
               <span>6. Visualization</span>
@@ -713,6 +721,25 @@ export default function DemoPage() {
       {/* 3. MAIN WORKSPACE */}
       <SectionContainer className="py-4 grow flex flex-col justify-start max-w-7xl mx-auto w-full space-y-4">
         
+        {/* HOW TO USE GUIDE BANNER */}
+        {!anyGeneratedFrames && !isGenerating && viewMode === "database" && (
+          <div className="bg-electric-blue/5 border border-electric-blue/20 rounded-xl p-3.5 flex items-start space-x-3 shadow-lg">
+            <Info className="h-4 w-4 text-electric-blue shrink-0 mt-0.5" />
+            <div className="flex-grow">
+              <span className="text-[10px] font-mono font-black text-electric-blue uppercase tracking-wider block mb-1.5">HOW TO USE</span>
+              <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono text-slate-400">
+                {["1. Select a cyclone from the dropdown", "2. Click two frames on the timeline below to set anchors", "3. Click \"Interpolate\" → AI generates the midpoint frame", "4. Switch to \"Compare View\" to analyse quality metrics"].map((step, i) => (
+                  <span key={i} className="flex items-center space-x-1.5">
+                    <span className="h-4 w-4 rounded-full bg-electric-blue/25 border border-electric-blue/40 flex items-center justify-center text-[8px] font-black text-electric-blue shrink-0">{i + 1}</span>
+                    <span>{step.replace(/^\d+\. /, "")}</span>
+                    {i < 3 && <ArrowRight className="h-2.5 w-2.5 text-slate-700 shrink-0" />}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Workspace Toolbar */}
         <ImageToolbar
           playbackMode={playbackMode}
@@ -725,6 +752,25 @@ export default function DemoPage() {
         {/* Dynamic Workspace Switcher (Triad vs Scientific Compare) */}
         {playbackMode === "compare" ? (
           (() => {
+            // Guard: if no frames have been generated yet, show a clear instruction instead of a broken compare view
+            if (!anyGeneratedFrames) {
+              return (
+                <div className="flex flex-col items-center justify-center text-center py-16 space-y-4 border border-dashed border-space-navy-800 bg-space-navy-900/20 rounded-xl">
+                  <div className="h-14 w-14 rounded-full border border-cyan-accent/20 bg-space-navy-900 flex items-center justify-center text-cyan-accent glow-dot-cyan">
+                    <Sparkles className="h-6 w-6 animate-pulse" />
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="font-heading text-sm font-bold text-white uppercase tracking-wider">
+                      No Frames Generated Yet
+                    </h3>
+                    <p className="text-xs font-mono text-slate-500 max-w-sm mx-auto leading-relaxed">
+                      Switch to <strong className="text-white">Database Explorer</strong>, select two anchor frames on the timeline, then click <strong className="text-cyan-accent">Interpolate</strong>. Come back here after generation to analyze metrics.
+                    </p>
+                  </div>
+                </div>
+              );
+            }
+
             const [pA, pB] = getSurroundingAnchors(currentTime);
             const depth = getInterpolationDepth(currentTime);
             const tempRes = getFrameTemporalResolution(currentTime);
@@ -756,7 +802,7 @@ export default function DemoPage() {
                 parentB={pB}
                 interpolationDepth={depth}
                 temporalResolution={tempRes}
-                modelVersion="best_model_512.pth"
+                modelVersion="best_model.pth"
                 rawTimestamps={rawTimestamps}
                 generatedTimestamps={Object.keys(generatedFrames).concat(cyclone?.generated_frames || [])}
                 currentTime={currentTime}
@@ -765,6 +811,7 @@ export default function DemoPage() {
               />
             );
           })()
+
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             {/* Left Panel */}
@@ -813,7 +860,7 @@ export default function DemoPage() {
         )}
 
         {/* 4. COMPACT GENERATION SUMMARY CARD (Visible after interpolation completes) */}
-        {playbackMode === "triad" && isInterpolated && interpolationResult && (
+        {playbackMode === "triad" && effectivelyInterpolated && interpolationResult && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
