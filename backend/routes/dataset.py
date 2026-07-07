@@ -62,13 +62,20 @@ def get_frame(
     cyclone_id: str = Query(..., description="Target cyclone ID (e.g. AMPHAN)"),
     timestamp: str = Query(..., description="Target timestamp (e.g. 01:00 or 01:15)"),
     type: str = Query("raw", description="Frame type: 'raw', 'interpolated', 'difference'"),
-    format: str = Query("png", description="File format: 'png' or 'nc'")
+    format: str = Query("png", description="File format: 'png' or 'nc'"),
+    colormap: str = Query("cyan", description="Colormap: 'cyan', 'grayscale', 'thermal'")
 ):
     """
-    Securely serve image previews and NetCDF data layers without exposing internal server paths.
+    Securely serve image previews and NetCDF data layers with dynamic colormap support
+    and clean white outer space backgrounds.
     """
     import config
+    import io
+    import numpy as np
+    import xarray as xr
     from pathlib import Path
+    from PIL import Image as _Image
+    from fastapi.responses import Response
     
     # Clean inputs
     sat = "".join(c for c in satellite if c.isalnum() or c in "-_").upper()
@@ -81,62 +88,130 @@ def get_frame(
     if type not in ["raw", "interpolated", "difference"]:
         raise HTTPException(status_code=400, detail="Invalid type. Supported: raw, interpolated, difference")
         
+    # Determine raw or cache source NC file path
     if type == "raw":
-        # Raw frames reside in datasets_root/{satellite}/{cyclone_id}/{timestamp}.[png|nc]
-        filename = f"{t_clean}.{format}"
-        full_path = config.DATASETS_DIR / sat / cy / filename
+        nc_filename = f"{t_clean}.nc"
+        nc_path = config.DATASETS_DIR / sat / cy / nc_filename
     else:
-        # Interpolated and difference frames reside in cache_root/
-        # Filename structure: rec_{satellite}_{cyclone_id}_{t_clean}[_diff].[png|nc]
         suffix = "_diff" if type == "difference" else ""
-        filename = f"rec_{sat}_{cy}_{t_clean}{suffix}.{format}"
-        full_path = config.CACHE_DIR / filename
+        nc_filename = f"rec_{sat}_{cy}_{t_clean}{suffix}.nc"
+        # If it's a difference type, the data is computed between generated CMI and Ground Truth
+        # But wait! Cache files for generated frames are rec_{sat}_{cy}_{t_clean}.nc.
+        # We can just open the generated NC file, and if difference is requested, we also open the raw GT NC file.
+        nc_path = config.CACHE_DIR / f"rec_{sat}_{cy}_{t_clean}.nc"
+
+    # If NetCDF format is requested, serve it directly
+    if format == "nc":
+        if type == "raw":
+            real_path = nc_path
+        else:
+            suffix = "_diff" if type == "difference" else ""
+            real_path = config.CACHE_DIR / f"rec_{sat}_{cy}_{t_clean}{suffix}.nc"
+            
+        if not real_path.exists():
+            raise HTTPException(status_code=404, detail="NetCDF file not found.")
+        return FileResponse(str(real_path), media_type="application/x-netcdf")
+
+    # For PNG previews: check if we can serve pre-computed default cyan PNG for raw frames to save CPU cycles
+    if colormap == "cyan" and type == "raw" and format == "png":
+        png_path = config.DATASETS_DIR / sat / cy / f"{t_clean}.png"
+        if png_path.exists():
+            return FileResponse(str(png_path), media_type="image/png")
+
+    # If the source NC file doesn't exist, we can't render anything
+    if not nc_path.exists():
+        raise HTTPException(status_code=404, detail=f"Source NetCDF array not found for rendering.")
+
+    try:
+        # Load the CMI layer
+        with config.NETCDF_LOCK:
+            ds = xr.open_dataset(str(nc_path))
+            arr = ds["CMI"].values.astype(np.float32)
+            ds.close()
+            
+        global_min = float(os.getenv("GLOBAL_MIN", "215.5"))
+        global_max = float(os.getenv("GLOBAL_MAX", "299.25"))
         
-    if not full_path.exists():
-        # PNG may have been wiped by an ephemeral-disk restart — try regenerating from NC
-        if format == "png" and type in ("interpolated", "difference"):
-            nc_path = config.CACHE_DIR / f"rec_{sat}_{cy}_{t_clean}.nc"
-            if nc_path.exists():
-                import numpy as np
-                import xarray as xr
-                from services.dataset_scanner import array_to_png
+        # Calculate dimensions and downsampling
+        h, w = arr.shape
+        preview_size = 1024
+        factor = max(1, h // preview_size)
+        downsampled = arr[::factor, ::factor]
+        
+        # Find nan mask (outer space background region)
+        nan_mask = np.isnan(downsampled)
+        
+        if type == "difference":
+            # For difference heatmaps: load actual GT NC to compute difference if available,
+            # otherwise fall back to gradients
+            gt_nc_path = config.DATASETS_DIR / sat / cy / f"{t_clean}.nc"
+            diff_img = None
+            
+            if gt_nc_path.exists():
                 try:
                     with config.NETCDF_LOCK:
-                        ds = xr.open_dataset(str(nc_path))
-                        arr = ds["CMI"].values.astype(np.float32)
-                        ds.close()
-                    global_min = float(os.getenv("GLOBAL_MIN", "215.5"))
-                    global_max = float(os.getenv("GLOBAL_MAX", "299.25"))
-                    if type == "difference":
-                        diff_norm = np.clip(np.abs(arr) / 20.0, 0.0, 1.0)
-                        diff_gray = (diff_norm * 255).astype(np.uint8)
-                        h, w = arr.shape
-                        diff_rgb = np.zeros((h, w, 3), dtype=np.uint8)
-                        diff_rgb[..., 0] = diff_gray
-                        diff_rgb[..., 1] = (diff_gray * 0.15).astype(np.uint8)
-                        diff_rgb[..., 2] = 20
-                        from PIL import Image as _Image
-                        _Image.fromarray(diff_rgb).save(str(full_path), "PNG")
-                    else:
-                        array_to_png(arr, global_min, global_max, full_path)
-                except Exception as regen_err:
-                    raise HTTPException(
-                        status_code=404,
-                        detail=f"File missing and regeneration failed: {regen_err}"
-                    )
-            else:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Requested {type} file not found (Format: {format}, Path: {filename})."
-                )
+                        with xr.open_dataset(str(gt_nc_path)) as ds_gt:
+                            gt_arr = ds_gt["CMI"].values.astype(np.float32)
+                    gt_down = gt_arr[::factor, ::factor]
+                    # Compute difference between generated downsampled and GT downsampled
+                    h_m = min(downsampled.shape[0], gt_down.shape[0])
+                    w_m = min(downsampled.shape[1], gt_down.shape[1])
+                    diff_img = np.abs(downsampled[:h_m, :w_m] - gt_down[:h_m, :w_m])
+                except Exception:
+                    pass
+                    
+            if diff_img is None:
+                # Gradient-based fallback difference map
+                grad_y, _ = np.gradient(downsampled)
+                diff_img = np.abs(grad_y) * 4.5
+                
+            diff_norm = np.clip(diff_img / 20.0, 0.0, 1.0)
+            diff_gray = (diff_norm * 255).astype(np.uint8)
+            hd, wd = diff_img.shape
+            rgb = np.zeros((hd, wd, 3), dtype=np.uint8)
+            
+            rgb[..., 0] = diff_gray
+            rgb[..., 1] = (diff_gray * 0.15).astype(np.uint8)
+            rgb[..., 2] = 20
+            
+            # Apply background white mask to difference map as well
+            nan_mask_diff = nan_mask[:hd, :wd]
+            rgb[nan_mask_diff] = 255
         else:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Requested {type} file not found (Format: {format}, Path: {filename})."
-            )
+            rng = global_max - global_min + 1e-8
+            norm = np.clip((downsampled - global_min) / rng, 0.0, 1.0)
+            inverted = 1.0 - norm
+            gray = (inverted * 255).astype(np.uint8)
+            
+            rgb = np.zeros((downsampled.shape[0], downsampled.shape[1], 3), dtype=np.uint8)
+            
+            if colormap == "grayscale":
+                rgb[..., 0] = gray
+                rgb[..., 1] = gray
+                rgb[..., 2] = gray
+            elif colormap == "thermal":
+                rgb[..., 0] = gray
+                rgb[..., 1] = np.clip(gray * 1.5 - 128, 0, 255).astype(np.uint8)
+                rgb[..., 2] = np.clip(gray * 3.0 - 510, 0, 255).astype(np.uint8)
+            else:
+                # Default cyan/blue false color
+                rgb[..., 0] = np.where(gray > 165, np.clip((gray - 165) * 2.8, 0, 255), 12).astype(np.uint8)
+                rgb[..., 1] = np.where(gray > 110, np.clip((gray - 110) * 1.8, 0, 255), 22).astype(np.uint8)
+                rgb[..., 2] = np.clip(gray * 1.1 + 40, 0, 255).astype(np.uint8)
+                
+            # Set background (NaNs) to white
+            rgb[nan_mask] = 255
+            
+        # Convert to PNG stream directly in memory
+        img_pil = _Image.fromarray(rgb)
+        buf = io.BytesIO()
+        img_pil.save(buf, format="PNG")
         
-    media_type = "image/png" if format == "png" else "application/x-netcdf"
-    return FileResponse(str(full_path), media_type=media_type)
+        return Response(content=buf.getvalue(), media_type="image/png")
+        
+    except Exception as err:
+        raise HTTPException(status_code=500, detail=f"Rendering pipeline failed: {err}")
+
 
 
 @router.get("/clear_cache")

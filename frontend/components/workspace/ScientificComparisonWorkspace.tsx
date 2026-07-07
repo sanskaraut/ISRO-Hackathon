@@ -43,6 +43,7 @@ interface ScientificComparisonWorkspaceProps {
   currentTime: string;
   setCurrentTime: (time: string) => void;
   cyclone: any;
+  colormap: string;
 }
 
 // ─── Metric bar helper ────────────────────────────────────────────────────────
@@ -83,7 +84,8 @@ export default function ScientificComparisonWorkspace({
   generatedTimestamps,
   currentTime,
   setCurrentTime,
-  cyclone
+  cyclone,
+  colormap
 }: ScientificComparisonWorkspaceProps) {
   // Mode selection: "single" (Single Frame Analysis) or "playback" (Animation Playback)
   const [workspaceMode, setWorkspaceMode] = useState<"single" | "playback">("single");
@@ -255,7 +257,7 @@ export default function ScientificComparisonWorkspace({
         bestRaw = raw;
       }
     }
-    return getApiUrl(`/frame?satellite=${satellite}&cyclone_id=${cycloneId}&timestamp=${bestRaw}&type=raw&format=png`);
+    return getApiUrl(`/frame?satellite=${satellite}&cyclone_id=${cycloneId}&timestamp=${bestRaw}&type=raw&format=png&colormap=${colormap}`);
   };
 
   // Helper to extract active original timestamp

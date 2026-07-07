@@ -328,36 +328,33 @@ def scan_and_generate_metadata():
             
             try:
                 # Validation 1: Readability
+                import netCDF4 as nc
                 with config.NETCDF_LOCK:
-                    ds = xr.open_dataset(str(nc_filepath))
-                    
-                    # Validation 2: Contains required variable CMI
-                    if "CMI" not in ds.variables:
-                        ds.close()
-                        raise ValueError("Required variable 'CMI' is missing.")
-                    
-                    # Validation 3: Dimensions check
-                    if ds["CMI"].ndim != 2:
-                        ds.close()
-                        raise ValueError(f"Expected 2D CMI variable, got {ds['CMI'].ndim}D.")
-                    
-                    cmi_shape = ds["CMI"].shape
-                    if cmi_shape[0] == 0 or cmi_shape[1] == 0:
-                        ds.close()
-                        raise ValueError(f"Empty dimensions: {cmi_shape}.")
-                    
-                    # Validation 4: Timestamp parseable from filename
-                    timestamp = parse_filename_to_timestamp(f)
-                    
-                    # Relative path from project root for frontend portability
-                    rel_nc = nc_filepath.relative_to(config.BASE_DIR).as_posix()
-                    rel_png = png_filepath.relative_to(config.BASE_DIR).as_posix()
-                    
-                    # Validation 5: Auto Preview PNG generation/reuse
-                    has_png = png_filepath.exists()
-                    if not has_png:
-                        cmi_data = ds["CMI"].values.astype(np.float32)
-                    ds.close()
+                    with nc.Dataset(str(nc_filepath), "r") as f_nc:
+                        # Validation 2: Contains required variable CMI
+                        if "CMI" not in f_nc.variables:
+                            raise ValueError("Required variable 'CMI' is missing.")
+                        
+                        var = f_nc.variables["CMI"]
+                        # Validation 3: Dimensions check
+                        if len(var.dimensions) != 2:
+                            raise ValueError(f"Expected 2D CMI variable, got {len(var.dimensions)}D.")
+                        
+                        cmi_shape = var.shape
+                        if cmi_shape[0] == 0 or cmi_shape[1] == 0:
+                            raise ValueError(f"Empty dimensions: {cmi_shape}.")
+                        
+                        # Validation 4: Timestamp parseable from filename
+                        timestamp = parse_filename_to_timestamp(f)
+                        
+                        # Relative path from project root for frontend portability
+                        rel_nc = nc_filepath.relative_to(config.BASE_DIR).as_posix()
+                        rel_png = png_filepath.relative_to(config.BASE_DIR).as_posix()
+                        
+                        # Validation 5: Auto Preview PNG generation/reuse
+                        has_png = png_filepath.exists()
+                        if not has_png:
+                            cmi_data = var[:].filled(np.nan).astype(np.float32) if isinstance(var[:], np.ma.MaskedArray) else np.array(var[:], dtype=np.float32)
                 
                 if not has_png:
                     try:

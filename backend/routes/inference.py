@@ -445,13 +445,36 @@ def upload_generate(
         output_diff_path = config.CACHE_DIR / output_diff_filename
         
         # 1. Call HF Spaces inference microservice
-        final_img, duration = _call_hf_inference(
-            str(temp_a_path), str(temp_b_path), timestep=0.5
+        import gzip
+        temp_gzip = config.CACHE_DIR / f"{uid}_upload_res.npy.gz"
+        duration = _call_hf_inference(
+            str(temp_a_path), str(temp_b_path), str(temp_gzip), timestep=0.5
         )
         
-        # 2. Save output NC
+        # Load the numpy array from the compressed response file
+        with gzip.open(str(temp_gzip), "rb") as f_gz:
+            final_img = np.load(f_gz)
+        temp_gzip.unlink(missing_ok=True)
+
+        # 2. Extract original NaN background masks before any nan_to_num conversion
         ds_a = xr.open_dataset(str(temp_a_path))
-        ds_out = ds_a.copy(deep=True)
+        data0_raw = ds_a["CMI"].values.astype(np.float32)
+        nan_mask_a = np.isnan(data0_raw)
+        ds_a.close()
+
+        ds_b = xr.open_dataset(str(temp_b_path))
+        data_b_raw = ds_b["CMI"].values.astype(np.float32)
+        nan_mask_b = np.isnan(data_b_raw)
+        ds_b.close()
+
+        # Compute shared background mask and apply it to final array
+        nan_mask = nan_mask_a & nan_mask_b
+        final_img[nan_mask] = np.nan
+
+        # Save output NC
+        ds_out_base = xr.open_dataset(str(temp_a_path))
+        ds_out = ds_out_base.copy(deep=True)
+        ds_out_base.close()
         ds_out["CMI"].values = final_img
         ds_out.to_netcdf(str(output_nc_path), encoding={"CMI": {"zlib": True, "complevel": 4}})
         ds_out.close()
@@ -471,35 +494,43 @@ def upload_generate(
         cmap = plt.get_cmap("viridis")
         colorized = (cmap(norm_img)[:, :, :3] * 255).astype(np.uint8)
         
+        # Set background pixels to pure white
+        nan_mask_downsampled = nan_mask[::factor, ::factor]
+        colorized[nan_mask_downsampled] = 255
+        
         img_pil = Image.fromarray(colorized)
         img_pil.save(str(output_png_path), format="PNG")
         
         # 4. Generate false color preview for A
-        data0 = ds_a["CMI"].values.astype(np.float32)
-        ds_a.close()
-        data0 = np.nan_to_num(data0, nan=global_min)
+        data0 = np.nan_to_num(data0_raw, nan=global_min)
         norm_a = np.clip((data0[::factor, ::factor] - global_min) / (global_max - global_min + 1e-8), 0.0, 1.0)
         colorized_a = (cmap(norm_a)[:, :, :3] * 255).astype(np.uint8)
+        # Apply mask
+        colorized_a[nan_mask_a[::factor, ::factor]] = 255
         output_png_a_path = config.CACHE_DIR / f"rec_CUSTOM_UPLOAD_{uid}_a.png"
         Image.fromarray(colorized_a).save(str(output_png_a_path), format="PNG")
         
         # 5. Generate false color preview for B
-        ds_b = xr.open_dataset(str(temp_b_path))
-        data_b = ds_b["CMI"].values.astype(np.float32)
-        ds_b.close()
-        data_b = np.nan_to_num(data_b, nan=global_min)
+        data_b = np.nan_to_num(data_b_raw, nan=global_min)
         norm_b = np.clip((data_b[::factor, ::factor] - global_min) / (global_max - global_min + 1e-8), 0.0, 1.0)
         colorized_b = (cmap(norm_b)[:, :, :3] * 255).astype(np.uint8)
+        # Apply mask
+        colorized_b[nan_mask_b[::factor, ::factor]] = 255
         output_png_b_path = config.CACHE_DIR / f"rec_CUSTOM_UPLOAD_{uid}_b.png"
         Image.fromarray(colorized_b).save(str(output_png_b_path), format="PNG")
         
         # 6. Save Difference Map PNG
-        diff = np.abs(final_img - data_b)
-        diff_downsampled = diff[::factor, ::factor]
-        norm_diff = np.clip(diff_downsampled / (global_max - global_min + 1e-8), 0.0, 1.0)
+        # Convert NaNs in downsampled to median/min to prevent math warnings in diff
+        downsampled_filled = np.nan_to_num(downsampled, nan=global_min)
+        data_b_down_filled = np.nan_to_num(data_b[::factor, ::factor], nan=global_min)
+        diff = np.abs(downsampled_filled - data_b_down_filled)
         
+        norm_diff = np.clip(diff / (global_max - global_min + 1e-8), 0.0, 1.0)
         cmap_inferno = plt.get_cmap("inferno")
         colorized_diff = (cmap_inferno(norm_diff)[:, :, :3] * 255).astype(np.uint8)
+        # Apply mask to diff map
+        colorized_diff[nan_mask_downsampled] = 255
+        
         img_diff_pil = Image.fromarray(colorized_diff)
         img_diff_pil.save(str(output_diff_path), format="PNG")
         

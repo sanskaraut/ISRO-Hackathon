@@ -128,6 +128,7 @@ export default function DemoPage() {
   const [playbackMode, setPlaybackMode] = useState<"triad" | "compare">("triad");
   const [centerViewMode, setCenterViewMode] = useState<"ai" | "raw">("ai");
   const [viewMode, setViewMode] = useState<"database" | "upload">("database");
+  const [colormap, setColormap] = useState<string>("cyan");
 
   // --- LIGHTBOX CONTROL ---
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
@@ -382,7 +383,7 @@ export default function DemoPage() {
       return generatedFrames[timestamp].png_data;
     }
     
-    return getApiUrl(`/frame?satellite=${cyclone.satellite}&cyclone_id=${cyclone.id}&timestamp=${timestamp}&type=${resolvedType}&format=png`);
+    return getApiUrl(`/frame?satellite=${cyclone.satellite}&cyclone_id=${cyclone.id}&timestamp=${timestamp}&type=${resolvedType}&format=png&colormap=${colormap}`);
   };
 
   // Generate NetCDF download paths
@@ -747,6 +748,8 @@ export default function DemoPage() {
           cycloneId={cyclone?.id}
           satellite={cyclone?.satellite || dataset}
           hasInterp={isInterpolated || !!(cyclone?.generated_frames && cyclone.generated_frames.length > 0)}
+          colormap={colormap}
+          setColormap={setColormap}
         />
 
         {/* Dynamic Workspace Switcher (Triad vs Scientific Compare) */}
@@ -791,8 +794,8 @@ export default function DemoPage() {
                 hasGroundTruth={!!cyclone?.ground_truth_availability?.[currentTime]}
                 metrics={frameMetrics}
                 inferenceTimeMs={infTime}
-                imageUrl={generatedFrames[currentTime]?.png_data || getApiUrl(`/frame?satellite=${cyclone?.satellite}&cyclone_id=${cyclone?.id}&timestamp=${currentTime}&type=interpolated&format=png`)}
-                gtImageUrl={getApiUrl(`/frame?satellite=${cyclone?.satellite}&cyclone_id=${cyclone?.id}&timestamp=${currentTime}&type=raw&format=png`)}
+                imageUrl={generatedFrames[currentTime]?.png_data || getApiUrl(`/frame?satellite=${cyclone?.satellite}&cyclone_id=${cyclone?.id}&timestamp=${currentTime}&type=interpolated&format=png&colormap=${colormap}`)}
+                gtImageUrl={getApiUrl(`/frame?satellite=${cyclone?.satellite}&cyclone_id=${cyclone?.id}&timestamp=${currentTime}&type=raw&format=png&colormap=${colormap}`)}
                 diffImageUrl={generatedFrames[currentTime]?.difference_png_data || getApiUrl(`/frame?satellite=${cyclone?.satellite}&cyclone_id=${cyclone?.id}&timestamp=${currentTime}&type=difference&format=png`)}
                 downloadNcUrl={getApiUrl(`/frame?satellite=${cyclone?.satellite}&cyclone_id=${cyclone?.id}&timestamp=${currentTime}&type=interpolated&format=nc`)}
                 downloadGtNcUrl={cyclone?.ground_truth_availability?.[currentTime] ? getApiUrl(`/frame?satellite=${cyclone?.satellite}&cyclone_id=${cyclone?.id}&timestamp=${currentTime}&type=raw&format=nc`) : null}
@@ -808,6 +811,7 @@ export default function DemoPage() {
                 currentTime={currentTime}
                 setCurrentTime={setCurrentTime}
                 cyclone={cyclone}
+                colormap={colormap}
               />
             );
           })()
@@ -827,7 +831,7 @@ export default function DemoPage() {
             {/* Center Panel (Success / Loading / Empty State) */}
             {isGenerating ? (
               <div className="w-full aspect-square md:aspect-[4/3] min-h-[300px]">
-                <LoadingSequence />
+                <LoadingSequence step={generationStep} />
               </div>
             ) : (
               <ImagePanel
