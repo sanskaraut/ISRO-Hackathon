@@ -4,7 +4,6 @@ import base64
 import gzip
 import time
 import numpy as np
-import xarray as xr
 from PIL import Image
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from schemas.responses import GenerateRequest, GenerateResponse, MetricSchema
@@ -170,13 +169,14 @@ def run_background_inference(
                 var = f_nc.createVariable("CMI", "f4", ("y", "x"))
                 var[:] = final_img
             
-        # Generate full-resolution false-color preview PNG (chunked internally to save memory)
-        array_to_png(final_img, GLOBAL_MIN, GLOBAL_MAX, out_png_path)
-        
-        # Keep downsampled version for the difference map (only 3MB in RAM)
+        # Keep downsampled version for the difference map BEFORE freeing full-res
         h, w = final_img.shape
         factor = max(1, min(h, w) // 1024)
-        final_down = final_img[::factor, ::factor]
+        final_down = final_img[::factor, ::factor].copy()
+        
+        # Generate full-resolution false-color preview PNG (chunked internally to save memory)
+        # Done AFTER taking the downsampled slice so both don't live simultaneously
+        array_to_png(final_img, GLOBAL_MIN, GLOBAL_MAX, out_png_path)
         
         # Free up the huge full-resolution array memory immediately
         del final_img
@@ -446,6 +446,11 @@ def upload_generate(
         
         # 1. Call HF Spaces inference microservice
         import gzip
+        import gc
+        import netCDF4 as nc4
+        global_min, global_max = GLOBAL_MIN, GLOBAL_MAX
+        rng = global_max - global_min + 1e-8
+        
         temp_gzip = config.CACHE_DIR / f"{uid}_upload_res.npy.gz"
         duration = _call_hf_inference(
             str(temp_a_path), str(temp_b_path), str(temp_gzip), timestep=0.5
@@ -456,83 +461,85 @@ def upload_generate(
             final_img = np.load(f_gz)
         temp_gzip.unlink(missing_ok=True)
 
-        # 2. Extract original NaN background masks before any nan_to_num conversion
-        ds_a = xr.open_dataset(str(temp_a_path))
-        data0_raw = ds_a["CMI"].values.astype(np.float32)
+        # 2. Extract NaN masks from input files (read only CMI, do NOT load full xarray dataset)
+        with config.NETCDF_LOCK:
+            with nc4.Dataset(str(temp_a_path), "r") as _f:
+                data0_raw = _f.variables["CMI"][:].astype(np.float32)
+            with nc4.Dataset(str(temp_b_path), "r") as _f:
+                data_b_raw = _f.variables["CMI"][:].astype(np.float32)
+
         nan_mask_a = np.isnan(data0_raw)
-        ds_a.close()
-
-        ds_b = xr.open_dataset(str(temp_b_path))
-        data_b_raw = ds_b["CMI"].values.astype(np.float32)
         nan_mask_b = np.isnan(data_b_raw)
-        ds_b.close()
-
-        # Compute shared background mask and apply it to final array
-        nan_mask = nan_mask_a & nan_mask_b
+        nan_mask   = nan_mask_a & nan_mask_b
         final_img[nan_mask] = np.nan
 
-        # Save output NC
-        ds_out_base = xr.open_dataset(str(temp_a_path))
-        ds_out = ds_out_base.copy(deep=True)
-        ds_out_base.close()
-        ds_out["CMI"].values = final_img
-        ds_out.to_netcdf(str(output_nc_path), encoding={"CMI": {"zlib": True, "complevel": 4}})
-        ds_out.close()
-        
-        # 3. Save output PNG
-        global_min, global_max = GLOBAL_MIN, GLOBAL_MAX
+        # Save output NC (direct netCDF4 write — avoids xr.copy(deep=True) cloning ~112 MB)
+        with config.NETCDF_LOCK:
+            with nc4.Dataset(str(output_nc_path), "w", format="NETCDF4") as _out:
+                _out.createDimension("y", final_img.shape[0])
+                _out.createDimension("x", final_img.shape[1])
+                _v = _out.createVariable("CMI", "f4", ("y", "x"),
+                                         zlib=True, complevel=4)
+                _v[:] = final_img
 
-        from PIL import Image
-        import matplotlib.pyplot as plt
-        
+        # Compute downsampled slice for all previews BEFORE we run full-res PNG gen
         h, w = final_img.shape
         preview_size = 1024
         factor = max(1, h // preview_size)
-        downsampled = final_img[::factor, ::factor]
-        
-        norm_img = np.clip((downsampled - global_min) / (global_max - global_min + 1e-8), 0.0, 1.0)
-        cmap = plt.get_cmap("viridis")
-        colorized = (cmap(norm_img)[:, :, :3] * 255).astype(np.uint8)
-        
-        # Set background pixels to pure white
-        nan_mask_downsampled = nan_mask[::factor, ::factor]
-        colorized[nan_mask_downsampled] = 255
-        
-        img_pil = Image.fromarray(colorized)
-        img_pil.save(str(output_png_path), format="PNG")
-        
-        # 4. Generate false color preview for A
-        data0 = np.nan_to_num(data0_raw, nan=global_min)
-        norm_a = np.clip((data0[::factor, ::factor] - global_min) / (global_max - global_min + 1e-8), 0.0, 1.0)
-        colorized_a = (cmap(norm_a)[:, :, :3] * 255).astype(np.uint8)
-        # Apply mask
-        colorized_a[nan_mask_a[::factor, ::factor]] = 255
+        downsampled      = final_img[::factor, ::factor].copy()
+        nan_mask_down    = nan_mask[::factor, ::factor]
+
+        # 3. Save full-resolution false-color PNG (chunked — no matplotlib RGBA expansion)
+        array_to_png(final_img, global_min, global_max, str(output_png_path))
+
+        # Free the 112 MB full-res array now that png + nc are saved
+        del final_img, nan_mask
+        gc.collect()
+
+        # ── helper: chunked false-color for downsampled previews ──────────────
+        def _false_color_png(arr_down, nan_m, out_path):
+            """Convert a small downsampled array to false-color PNG without matplotlib."""
+            norm = np.clip((arr_down - global_min) / rng, 0.0, 1.0).astype(np.float32)
+            # Viridis-like approximation using the same IR palette as array_to_png
+            inv  = (1.0 - norm)
+            gray = (inv * 255).astype(np.uint8)
+            rgb  = np.zeros((*gray.shape, 3), dtype=np.uint8)
+            rgb[..., 0] = np.where(gray > 165, np.clip((gray.astype(np.int16) - 165) * 3, 0, 255), 12).astype(np.uint8)
+            rgb[..., 1] = np.where(gray > 110, np.clip((gray.astype(np.int16) - 110) * 2, 0, 255), 22).astype(np.uint8)
+            rgb[..., 2] = np.clip(gray.astype(np.int16) * 1 + 40, 0, 255).astype(np.uint8)
+            rgb[nan_m]  = 255  # white background
+            Image.fromarray(rgb).save(str(out_path), format="PNG")
+            del norm, inv, gray, rgb
+        # ─────────────────────────────────────────────────────────────────────
+
+        # 4. Generate false-color preview for frame A
+        data0_down = np.nan_to_num(data0_raw[::factor, ::factor], nan=global_min)
         output_png_a_path = config.CACHE_DIR / f"rec_CUSTOM_UPLOAD_{uid}_a.png"
-        Image.fromarray(colorized_a).save(str(output_png_a_path), format="PNG")
-        
-        # 5. Generate false color preview for B
-        data_b = np.nan_to_num(data_b_raw, nan=global_min)
-        norm_b = np.clip((data_b[::factor, ::factor] - global_min) / (global_max - global_min + 1e-8), 0.0, 1.0)
-        colorized_b = (cmap(norm_b)[:, :, :3] * 255).astype(np.uint8)
-        # Apply mask
-        colorized_b[nan_mask_b[::factor, ::factor]] = 255
+        _false_color_png(data0_down, nan_mask_a[::factor, ::factor], output_png_a_path)
+        del data0_raw, data0_down, nan_mask_a
+        gc.collect()
+
+        # 5. Generate false-color preview for frame B
+        data_b_down = np.nan_to_num(data_b_raw[::factor, ::factor], nan=global_min)
         output_png_b_path = config.CACHE_DIR / f"rec_CUSTOM_UPLOAD_{uid}_b.png"
-        Image.fromarray(colorized_b).save(str(output_png_b_path), format="PNG")
-        
-        # 6. Save Difference Map PNG
-        # Convert NaNs in downsampled to median/min to prevent math warnings in diff
+        _false_color_png(data_b_down, nan_mask_b[::factor, ::factor], output_png_b_path)
+
+        # 6. Save Difference Map PNG (inferno-like: red channel driven by diff magnitude)
         downsampled_filled = np.nan_to_num(downsampled, nan=global_min)
-        data_b_down_filled = np.nan_to_num(data_b[::factor, ::factor], nan=global_min)
-        diff = np.abs(downsampled_filled - data_b_down_filled)
-        
-        norm_diff = np.clip(diff / (global_max - global_min + 1e-8), 0.0, 1.0)
-        cmap_inferno = plt.get_cmap("inferno")
-        colorized_diff = (cmap_inferno(norm_diff)[:, :, :3] * 255).astype(np.uint8)
-        # Apply mask to diff map
-        colorized_diff[nan_mask_downsampled] = 255
-        
-        img_diff_pil = Image.fromarray(colorized_diff)
-        img_diff_pil.save(str(output_diff_path), format="PNG")
+        diff = np.abs(downsampled_filled - data_b_down)
+        del data_b_raw, data_b_down, nan_mask_b, downsampled_filled
+        gc.collect()
+
+        diff_norm = np.clip(diff / rng, 0.0, 1.0)
+        diff_gray = (diff_norm * 255).astype(np.uint8)
+        diff_rgb  = np.zeros((*diff_gray.shape, 3), dtype=np.uint8)
+        diff_rgb[..., 0] = diff_gray
+        diff_rgb[..., 1] = (diff_gray * 0.15).astype(np.uint8)
+        diff_rgb[..., 2] = 20
+        diff_rgb[nan_mask_down] = 255
+        Image.fromarray(diff_rgb).save(str(output_diff_path), format="PNG")
+        del diff, diff_norm, diff_gray, diff_rgb, downsampled, nan_mask_down
+        gc.collect()
         
         # Clean temp files
         temp_a_path.unlink(missing_ok=True)

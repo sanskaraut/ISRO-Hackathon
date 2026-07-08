@@ -8,9 +8,9 @@ import {
 } from "lucide-react";
 import { getApiUrl } from "@/utils/api";
 
-// ─── Model training constants (from checkpoint epoch 9) ──────────────────────
-const MODEL_BEST_VAL_SSIM  = 0.9319521307945251;
-const MODEL_BEST_VAL_EPOCH = 9;
+// ─── Model training constants (from checkpoint epoch 13, best_model_6k) ────────
+const MODEL_BEST_VAL_SSIM  = 0.9387649203601637;
+const MODEL_BEST_VAL_EPOCH = 13;
 
 interface ScientificComparisonWorkspaceProps {
   satellite: string;
@@ -964,7 +964,7 @@ export default function ScientificComparisonWorkspace({
                       <span className="text-[9px] font-mono text-slate-400 ml-1.5">SSIM</span>
                     </div>
                     <div className="text-right">
-                      <span className="text-[8px] font-mono text-emerald-400 block font-bold">≈ 93.2%</span>
+                      <span className="text-[8px] font-mono text-emerald-400 block font-bold">≈ {(MODEL_BEST_VAL_SSIM * 100).toFixed(1)}%</span>
                       <span className="text-[7px] font-mono text-slate-500">structural accuracy</span>
                     </div>
                   </div>
