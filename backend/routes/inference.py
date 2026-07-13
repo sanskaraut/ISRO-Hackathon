@@ -12,10 +12,13 @@ from services.dataset_scanner import (
     update_metadata_index,
     time_str_to_minutes,
     minutes_to_time_str,
-    array_to_png
+    array_to_png,
+    array_to_png_from_nc
 )
 import requests as http_requests
 import config
+
+import threading
 
 router = APIRouter()
 
@@ -26,6 +29,12 @@ HF_SPACES_URL = os.getenv("HF_SPACES_URL", "").rstrip("/")
 # Global registry of active background inference tasks to prevent duplicate requests
 # and allow asynchronous client polling
 RUNNING_TASKS = {}
+
+# Semaphore to allow only ONE concurrent HF Spaces call at a time.
+# This prevents N simultaneous 112 MB array allocations from OOM-ing the Render instance.
+# Additional requests still get accepted and queued via FastAPI BackgroundTasks —
+# they simply block here until the current inference completes (up to 10 minutes).
+_INFERENCE_SEMAPHORE = threading.Semaphore(1)
 
 
 def _png_to_b64(path) -> str:
@@ -145,13 +154,21 @@ def run_background_inference(
 ):
     try:
         print(f"[BG INFERENCE] Started task {task_key}")
-        
-        # Stream download directly to temporary npy.gz file to save memory
-        from pathlib import Path
-        temp_gzip = Path(out_nc_path).with_suffix(".npy.gz")
-        duration_ms = _call_hf_inference(
-            str(nc_path_a), str(nc_path_b), str(temp_gzip), timestep=timestep
-        )
+
+        # Acquire the global semaphore — blocks until any currently running HF call finishes.
+        # Timeout after 10 minutes to avoid hanging forever if HF Space is down.
+        acquired = _INFERENCE_SEMAPHORE.acquire(timeout=600)
+        if not acquired:
+            raise RuntimeError("[BG INFERENCE] Semaphore timeout after 10 min — HF Space may be unresponsive.")
+        try:
+            # Stream download directly to temporary npy.gz file to save memory
+            from pathlib import Path
+            temp_gzip = Path(out_nc_path).with_suffix(".npy.gz")
+            duration_ms = _call_hf_inference(
+                str(nc_path_a), str(nc_path_b), str(temp_gzip), timestep=timestep
+            )
+        finally:
+            _INFERENCE_SEMAPHORE.release()
         
         # Load the numpy array directly from the compressed file stream
         with gzip.open(str(temp_gzip), "rb") as f_gz:
@@ -168,20 +185,20 @@ def run_background_inference(
                 f_nc.createDimension("x", final_img.shape[1])
                 var = f_nc.createVariable("CMI", "f4", ("y", "x"))
                 var[:] = final_img
-            
+
         # Keep downsampled version for the difference map BEFORE freeing full-res
         h, w = final_img.shape
         factor = max(1, min(h, w) // 1024)
         final_down = final_img[::factor, ::factor].copy()
-        
-        # Generate full-resolution false-color preview PNG (chunked internally to save memory)
-        # Done AFTER taking the downsampled slice so both don't live simultaneously
-        array_to_png(final_img, GLOBAL_MIN, GLOBAL_MAX, out_png_path)
-        
-        # Free up the huge full-resolution array memory immediately
+
+        # Free the huge full-resolution array BEFORE PNG generation so we don't
+        # hold 2× 112 MB simultaneously (array_to_png reads in 512-row chunks itself)
         del final_img
         import gc
         gc.collect()
+
+        # Generate full-resolution false-color preview PNG by reading from the NC we just wrote
+        array_to_png_from_nc(str(out_nc_path), GLOBAL_MIN, GLOBAL_MAX, out_png_path)
         
         # Save Difference/Error Heatmap PNG (downsampled sliced reading from disk to save memory)
         gt_down = None
@@ -236,16 +253,16 @@ def run_background_inference(
         
         # Register new frame in database cache index
         update_metadata_index(
-            sat, 
-            cy, 
-            target_time_str, 
+            sat,
+            cy,
+            target_time_str,
             has_ground_truth=has_gt,
             metrics=metrics,
             parent_timestamps=[frame_a_time, frame_b_time],
             interpolation_depth=depth,
             temporal_resolution=temporal_res,
             inference_time=duration_ms,
-            model_version="best_model_512.pth"
+            model_version="best_model_6k.pth"
         )
         print(f"[BG INFERENCE] Finished task {task_key}")
     except Exception as e:
@@ -372,7 +389,8 @@ def generate_interpolated_frame(request: GenerateRequest, background_tasks: Back
         )
         
     # Check if task is already running in background
-    task_key = f"{sat}_{cy}_{t_target_clean}_{request.timestep}"
+    # Normalize timestep to 2dp to avoid float repr collisions (e.g. 0.5 vs 0.50)
+    task_key = f"{sat}_{cy}_{t_target_clean}_{request.timestep:.2f}"
     if task_key not in RUNNING_TASKS:
         RUNNING_TASKS[task_key] = "processing"
         background_tasks.add_task(

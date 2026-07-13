@@ -99,9 +99,13 @@ def array_to_png(array, global_min, global_max, output_path):
     for y_start in range(0, h, chunk_size):
         y_end = min(y_start + chunk_size, h)
         chunk = array[y_start:y_end, :]
-        
+
+        # Build NaN mask for this chunk so we can paint them white later
+        nan_mask_chunk = np.isnan(chunk)
+
         # Calculate false-color mappings in-place to keep memory minimal
-        norm = np.clip((chunk - global_min) / rng, 0.0, 1.0)
+        # nan_to_num ensures NaN pixels map to global_min (coldest = white after inversion)
+        norm = np.clip((np.nan_to_num(chunk, nan=global_min) - global_min) / rng, 0.0, 1.0)
         inverted = 1.0 - norm
         gray = (inverted * 255).astype(np.uint8)
         
@@ -111,13 +115,57 @@ def array_to_png(array, global_min, global_max, output_path):
         rgb[..., 0] = np.where(gray > 165, np.clip((gray - 165) * 2.8, 0, 255), 12).astype(np.uint8)
         rgb[..., 1] = np.where(gray > 110, np.clip((gray - 110) * 1.8, 0, 255), 22).astype(np.uint8)
         rgb[..., 2] = np.clip(gray * 1.1 + 40, 0, 255).astype(np.uint8)
-        
+
+        # Paint outer-space (NaN) pixels white to match the /frame route behaviour
+        rgb[nan_mask_chunk] = 255
+
         chunk_img = Image.fromarray(rgb)
         img.paste(chunk_img, (0, y_start))
-        
+
         # Force garbage collection for the chunk memory
-        del chunk, norm, inverted, gray, rgb, chunk_img
+        del chunk, norm, inverted, gray, rgb, chunk_img, nan_mask_chunk
         
+    img.save(output_path, "PNG")
+
+
+def array_to_png_from_nc(nc_path: str, global_min: float, global_max: float, output_path: str):
+    """
+    Stream a CMI variable from a NetCDF4 file into a false-color PNG in 512-row chunks.
+    The full array is NEVER loaded into RAM — netCDF4 reads each slice directly from disk.
+    This is the memory-safe alternative to array_to_png when you don't already have the
+    array in memory (e.g. after writing it to disk in the background inference task).
+    """
+    import netCDF4 as _nc4
+
+    rng = global_max - global_min + 1e-8
+    chunk_size = 512
+
+    with _nc4.Dataset(nc_path, "r") as ds:
+        var = ds.variables["CMI"]
+        h, w = var.shape
+        img = Image.new("RGB", (w, h))
+
+        for y_start in range(0, h, chunk_size):
+            y_end = min(y_start + chunk_size, h)
+            # Sliced disk read — only chunk_size rows loaded at a time
+            chunk = var[y_start:y_end, :].astype(np.float32)
+
+            nan_mask_chunk = np.isnan(chunk)
+            norm = np.clip((np.nan_to_num(chunk, nan=global_min) - global_min) / rng, 0.0, 1.0)
+            inverted = 1.0 - norm
+            gray = (inverted * 255).astype(np.uint8)
+
+            ch_h = y_end - y_start
+            rgb = np.zeros((ch_h, w, 3), dtype=np.uint8)
+            rgb[..., 0] = np.where(gray > 165, np.clip((gray - 165) * 2.8, 0, 255), 12).astype(np.uint8)
+            rgb[..., 1] = np.where(gray > 110, np.clip((gray - 110) * 1.8, 0, 255), 22).astype(np.uint8)
+            rgb[..., 2] = np.clip(gray * 1.1 + 40, 0, 255).astype(np.uint8)
+            rgb[nan_mask_chunk] = 255
+
+            chunk_img = Image.fromarray(rgb)
+            img.paste(chunk_img, (0, y_start))
+            del chunk, norm, inverted, gray, rgb, chunk_img, nan_mask_chunk
+
     img.save(output_path, "PNG")
 
 def parse_raw_satellite_filename(filename: str):
@@ -194,58 +242,65 @@ def ingest_raw_files():
         
     for f_path in nc_files:
         try:
-            # Open source dataset first to inspect metadata attributes for cyclone/storm name
-            ds = xr.open_dataset(str(f_path))
-            
+            # Read cyclone name from NetCDF global attributes using netCDF4 directly
+            # (avoids xarray eager RAM allocation for a simple attribute read)
+            import netCDF4 as _nc4_ingest
             cyclone_name = None
-            for attr_key in ["cyclone_name", "storm_name", "cyclone", "storm", "title"]:
-                val = ds.attrs.get(attr_key)
-                if val and isinstance(val, str):
-                    if attr_key == "title" and ("Cloud" in val or "Imagery" in val or "Dataset" in val):
-                        continue
-                    clean_val = "".join(c for c in val if c.isalnum() or c in "-_ ").strip()
-                    if clean_val:
-                        cyclone_name = clean_val.upper().replace(" ", "_")
-                        break
-            
-            # Close dataset to unlock file
-            ds.close()
-            
+            with config.NETCDF_LOCK:
+                with _nc4_ingest.Dataset(str(f_path), "r") as _ds_attr:
+                    for attr_key in ["cyclone_name", "storm_name", "cyclone", "storm", "title"]:
+                        val = getattr(_ds_attr, attr_key, None)
+                        if val and isinstance(val, str):
+                            if attr_key == "title" and ("Cloud" in val or "Imagery" in val or "Dataset" in val):
+                                continue
+                            clean_val = "".join(c for c in val if c.isalnum() or c in "-_ ").strip()
+                            if clean_val:
+                                cyclone_name = clean_val.upper().replace(" ", "_")
+                                break
+
             sat, cy_date, t_str = parse_raw_satellite_filename(f_path.name)
-            
+
             # If NetCDF attributes contain a cyclone name, use it instead of date-based default
             final_cy_name = cyclone_name if cyclone_name else cy_date
             t_clean = t_str.replace(":", "")
-            
+
             target_dir = config.DATASETS_DIR / sat / final_cy_name
             target_dir.mkdir(parents=True, exist_ok=True)
-            
+
             dest_nc_path = target_dir / f"{t_clean}.nc"
             dest_png_path = target_dir / f"{t_clean}.png"
-            
+
             logger.info(f"[INGEST] Processing {f_path.name}")
             logger.info(f"         -> Satellite: {sat}")
             logger.info(f"         -> Cyclone Folder: {final_cy_name} (Source: {'Metadata' if cyclone_name else 'Filename Date'})")
             logger.info(f"         -> Timestamp: {t_str}")
             logger.info(f"         -> Target: datasets/{sat}/{final_cy_name}/{t_clean}.nc")
-            
+
             shutil.copy2(str(f_path), str(dest_nc_path))
-            
+
             if not dest_png_path.exists():
                 try:
-                    ds = xr.open_dataset(str(dest_nc_path))
-                    if "CMI" in ds.variables:
-                        cmi_data = ds["CMI"].values.astype(np.float32)
-                        cmi_data = np.nan_to_num(cmi_data, nan=global_min)
-                        array_to_png(cmi_data, global_min, global_max, str(dest_png_path))
-                        logger.info(f"         -> Generated preview: {t_clean}.png")
-                    ds.close()
+                    # Use netCDF4 sliced read — never loads the full array into RAM
+                    # just the CMI variable, chunked immediately by array_to_png
+                    import gc
+                    with config.NETCDF_LOCK:
+                        with _nc4_ingest.Dataset(str(dest_nc_path), "r") as _ds_prev:
+                            if "CMI" in _ds_prev.variables:
+                                _var = _ds_prev.variables["CMI"]
+                                cmi_data = _var[:].filled(np.nan).astype(np.float32) \
+                                    if isinstance(_var[:], np.ma.MaskedArray) \
+                                    else np.array(_var[:], dtype=np.float32)
+                    cmi_data = np.nan_to_num(cmi_data, nan=global_min)
+                    array_to_png(cmi_data, global_min, global_max, str(dest_png_path))
+                    del cmi_data
+                    gc.collect()
+                    logger.info(f"         -> Generated preview: {t_clean}.png")
                 except Exception as preview_err:
                     logger.warning(f"Failed to generate preview for ingested file: {preview_err}")
-            
+
             f_path.unlink()
             logger.info("[INGEST] Ingested and cleaned up successfully.")
-            
+
         except Exception as err:
             logger.error(f"Failed to ingest file {f_path.name}: {err}")
             

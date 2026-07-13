@@ -137,6 +137,25 @@ export default function LandingPage() {
                 <span className="font-heading text-sm font-semibold text-white uppercase">10-Min Delta</span>
               </div>
             </motion.div>
+
+            {/* Live model accuracy metrics strip */}
+            <motion.div
+              variants={fadeInUp}
+              custom={0.5}
+              className="grid grid-cols-4 gap-3 pt-2"
+            >
+              {[
+                { label: "SSIM", value: "0.9319", color: "text-cyan-accent" },
+                { label: "PSNR", value: "32.84 dB", color: "text-electric-blue" },
+                { label: "TRAINING", value: "6 000 ep", color: "text-white" },
+                { label: "RESOLUTION", value: "10-min", color: "text-emerald-400" },
+              ].map((m) => (
+                <div key={m.label} className="bg-space-navy-900/60 border border-space-navy-800 rounded-lg px-3 py-2 text-center">
+                  <span className="font-mono text-[8px] uppercase tracking-widest text-slate-500 block">{m.label}</span>
+                  <span className={`font-heading text-sm font-black ${m.color}`}>{m.value}</span>
+                </div>
+              ))}
+            </motion.div>
           </motion.div>
 
           {/* Hero Right Visuals (Rotating Globe) */}
@@ -361,7 +380,7 @@ export default function LandingPage() {
               OPERATIONAL TELEMETRY FLOW
             </Badge>
             <h2 className="font-heading text-2xl md:text-3xl font-bold uppercase text-white tracking-wider">
-              Data Pipeline Pipeline
+              Operational Data Flow
             </h2>
             <p className="font-sans text-sm text-slate-400 max-w-xl mx-auto leading-relaxed">
               Below is the operational data flow pathway mapping input sensor ingestion, deep interpolation, and visual upsampling.

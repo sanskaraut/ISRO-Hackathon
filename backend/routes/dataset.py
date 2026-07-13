@@ -72,7 +72,7 @@ def get_frame(
     import config
     import io
     import numpy as np
-    import xarray as xr
+    import netCDF4 as _nc4
     from pathlib import Path
     from PIL import Image as _Image
     from fastapi.responses import Response
@@ -123,43 +123,45 @@ def get_frame(
         raise HTTPException(status_code=404, detail=f"Source NetCDF array not found for rendering.")
 
     try:
-        # Load the CMI layer
-        with config.NETCDF_LOCK:
-            ds = xr.open_dataset(str(nc_path))
-            arr = ds["CMI"].values.astype(np.float32)
-            ds.close()
-            
         global_min = float(os.getenv("GLOBAL_MIN", "215.5"))
         global_max = float(os.getenv("GLOBAL_MAX", "299.25"))
-        
-        # Calculate dimensions and downsampling
-        h, w = arr.shape
-        preview_size = 1024
-        factor = max(1, h // preview_size)
-        downsampled = arr[::factor, ::factor]
-        
-        # Find nan mask (outer space background region)
+
+        # Read only the downsampled slice directly from disk to avoid loading 112 MB into RAM
+        with config.NETCDF_LOCK:
+            with _nc4.Dataset(str(nc_path), "r") as _ds:
+                var = _ds.variables["CMI"]
+                h_full, w_full = var.shape
+                preview_size = 1024
+                factor = max(1, h_full // preview_size)
+                # Sliced read — netCDF4 only loads the strided rows from disk
+                downsampled = var[::factor, ::factor].astype(np.float32)
+
+        # Find nan mask (outer space background region) before filling NaNs
         nan_mask = np.isnan(downsampled)
-        
+        # Fill NaNs so subsequent arithmetic doesn't produce RuntimeWarning or garbage pixels
+        downsampled = np.nan_to_num(downsampled, nan=global_min)
+
         if type == "difference":
             # For difference heatmaps: load actual GT NC to compute difference if available,
             # otherwise fall back to gradients
             gt_nc_path = config.DATASETS_DIR / sat / cy / f"{t_clean}.nc"
             diff_img = None
-            
+
             if gt_nc_path.exists():
                 try:
                     with config.NETCDF_LOCK:
-                        with xr.open_dataset(str(gt_nc_path)) as ds_gt:
-                            gt_arr = ds_gt["CMI"].values.astype(np.float32)
-                    gt_down = gt_arr[::factor, ::factor]
+                        with _nc4.Dataset(str(gt_nc_path), "r") as _ds_gt:
+                            _var_gt = _ds_gt.variables["CMI"]
+                            gt_down = _var_gt[::factor, ::factor].astype(np.float32)
+                    gt_down = np.nan_to_num(gt_down, nan=global_min)
                     # Compute difference between generated downsampled and GT downsampled
                     h_m = min(downsampled.shape[0], gt_down.shape[0])
                     w_m = min(downsampled.shape[1], gt_down.shape[1])
                     diff_img = np.abs(downsampled[:h_m, :w_m] - gt_down[:h_m, :w_m])
+                    del gt_down
                 except Exception:
                     pass
-                    
+
             if diff_img is None:
                 # Gradient-based fallback difference map
                 grad_y, _ = np.gradient(downsampled)
@@ -180,7 +182,7 @@ def get_frame(
         else:
             rng = global_max - global_min + 1e-8
             norm = np.clip((downsampled - global_min) / rng, 0.0, 1.0)
-            inverted = 1.0 - norm
+            inverted = np.nan_to_num(1.0 - norm, nan=0.0)
             gray = (inverted * 255).astype(np.uint8)
             
             rgb = np.zeros((downsampled.shape[0], downsampled.shape[1], 3), dtype=np.uint8)
@@ -206,9 +208,14 @@ def get_frame(
         img_pil = _Image.fromarray(rgb)
         buf = io.BytesIO()
         img_pil.save(buf, format="PNG")
-        
-        return Response(content=buf.getvalue(), media_type="image/png")
-        
+
+        # Free large arrays before returning the response to keep RSS low
+        png_bytes = buf.getvalue()
+        del downsampled, rgb, img_pil, buf
+        import gc; gc.collect()
+
+        return Response(content=png_bytes, media_type="image/png")
+
     except Exception as err:
         raise HTTPException(status_code=500, detail=f"Rendering pipeline failed: {err}")
 
@@ -227,7 +234,15 @@ def clear_cache():
     
     logger = logging.getLogger("app")
     logger.info("[CLEAR CACHE] Initiating database cache wipe...")
-    
+
+    # Guard: refuse to wipe while inference tasks are actively running to avoid race conditions
+    if RUNNING_TASKS:
+        running_list = list(RUNNING_TASKS.keys())
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cache wipe rejected: {len(running_list)} inference task(s) still running: {running_list}. Wait for them to complete or restart the server."
+        )
+
     # 1. Clear running inference task registry
     RUNNING_TASKS.clear()
     
