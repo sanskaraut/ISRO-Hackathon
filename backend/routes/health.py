@@ -30,3 +30,12 @@ def health_check():
         datasets_indexed=count,
         generated_frames=generated_count
     )
+
+@router.get("/ping")
+def ping_check():
+    """
+    Super lightweight keep-alive ping check for cron jobs.
+    Bypasses all NetCDF, scanning, and model status checks.
+    """
+    return {"status": "ok", "message": "pong"}
+

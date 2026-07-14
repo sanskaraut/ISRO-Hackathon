@@ -112,15 +112,28 @@ def get_frame(
             raise HTTPException(status_code=404, detail="NetCDF file not found.")
         return FileResponse(str(real_path), media_type="application/x-netcdf")
 
-    # For PNG previews: check if we can serve pre-computed default cyan PNG for raw frames to save CPU cycles
-    if colormap == "cyan" and type == "raw" and format == "png":
-        png_path = config.DATASETS_DIR / sat / cy / f"{t_clean}.png"
+    # For PNG previews: check if we can serve pre-computed default cyan PNG (either raw or cached) to save CPU and memory
+    if colormap == "cyan" and format == "png":
+        if type == "raw":
+            png_path = config.DATASETS_DIR / sat / cy / f"{t_clean}.png"
+        else:
+            suffix = "_diff" if type == "difference" else ""
+            png_path = config.CACHE_DIR / f"rec_{sat}_{cy}_{t_clean}{suffix}.png"
+            
         if png_path.exists():
+            import logging
+            logging.getLogger("app").info(f"[FRAME CACHE HIT] Serving pre-generated preview directly from disk: {png_path.name}")
             return FileResponse(str(png_path), media_type="image/png")
+        else:
+            import logging
+            logging.getLogger("app").info(f"[FRAME CACHE MISS] Pre-generated PNG not found. Re-rendering dynamically. (Path: {png_path.name})")
 
     # If the source NC file doesn't exist, we can't render anything
     if not nc_path.exists():
+        import logging
+        logging.getLogger("app").warning(f"[FRAME ERROR] NetCDF array not found: {nc_path.name}")
         raise HTTPException(status_code=404, detail=f"Source NetCDF array not found for rendering.")
+
 
     try:
         global_min = float(os.getenv("GLOBAL_MIN", "215.5"))

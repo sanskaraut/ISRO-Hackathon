@@ -192,13 +192,30 @@ def run_background_inference(
         final_down = final_img[::factor, ::factor].copy()
 
         # Free the huge full-resolution array BEFORE PNG generation so we don't
-        # hold 2× 112 MB simultaneously (array_to_png reads in 512-row chunks itself)
+        # hold 2x 112 MB simultaneously
         del final_img
         import gc
         gc.collect()
 
-        # Generate full-resolution false-color preview PNG by reading from the NC we just wrote
+        # Generate false-color preview PNG in chunks to keep memory footprint minimal
+        print(f"[BG INFERENCE] Generating temporary preview PNG for {task_key}...")
         array_to_png_from_nc(str(out_nc_path), GLOBAL_MIN, GLOBAL_MAX, out_png_path)
+        
+        # High-Quality downsampling using PIL's Lanczos resampling to prevent aliasing/jagged edges
+        try:
+            with Image.open(out_png_path) as full_img:
+                h_p, w_p = full_img.size
+                if max(h_p, w_p) > 1536:
+                    scale = 1536 / max(h_p, w_p)
+                    new_size = (int(w_p * scale), int(h_p * scale))
+                    print(f"[BG INFERENCE QUALITY] Resizing preview via Lanczos filter from {w_p}x{h_p} to {new_size[0]}x{new_size[1]}...")
+                    resized_img = full_img.resize(new_size, resample=Image.Resampling.LANCZOS)
+                    resized_img.save(out_png_path, "PNG", optimize=True)
+                    del resized_img
+                    print(f"[BG INFERENCE QUALITY] Resized preview saved successfully.")
+        except Exception as resize_err:
+            print(f"[BG INFERENCE ERROR] High-quality Lanczos resizing failed: {resize_err}")
+
         
         # Save Difference/Error Heatmap PNG (downsampled sliced reading from disk to save memory)
         gt_down = None
@@ -384,8 +401,9 @@ def generate_interpolated_frame(request: GenerateRequest, background_tasks: Back
             difference_png_url=secure_diff_url,
             is_difference_map_placeholder=is_diff_placeholder,
             nc_url=secure_nc_url,
-            png_data=_png_to_b64(out_png_path),
-            difference_png_data=_png_to_b64(out_diff_path),
+            png_data=None,
+            difference_png_data=None,
+
         )
         
     # Check if task is already running in background
@@ -510,9 +528,24 @@ def upload_generate(
         # 3. Save full-resolution false-color PNG (chunked — no matplotlib RGBA expansion)
         array_to_png(final_img, global_min, global_max, str(output_png_path))
 
+        # High-Quality downsampling using PIL's Lanczos resampling
+        try:
+            with Image.open(output_png_path) as full_img:
+                h_p, w_p = full_img.size
+                if max(h_p, w_p) > 1536:
+                    scale = 1536 / max(h_p, w_p)
+                    new_size = (int(w_p * scale), int(h_p * scale))
+                    print(f"[UPLOAD QUALITY] Resizing preview via Lanczos filter from {w_p}x{h_p} to {new_size[0]}x{new_size[1]}...")
+                    resized_img = full_img.resize(new_size, resample=Image.Resampling.LANCZOS)
+                    resized_img.save(output_png_path, "PNG", optimize=True)
+                    del resized_img
+        except Exception as err:
+            print(f"[UPLOAD ERROR] High-quality Lanczos resizing failed: {err}")
+
         # Free the 112 MB full-res array now that png + nc are saved
         del final_img, nan_mask
         gc.collect()
+
 
         # ── helper: chunked false-color for downsampled previews ──────────────
         def _false_color_png(arr_down, nan_m, out_path):
@@ -573,10 +606,10 @@ def upload_generate(
             "download_url": f"/frame?satellite=CUSTOM&cyclone_id=UPLOAD&timestamp={uid}&type=interpolated&format=nc",
             "image_a_url": f"/frame?satellite=CUSTOM&cyclone_id=UPLOAD&timestamp={uid}_a&type=interpolated&format=png",
             "image_b_url": f"/frame?satellite=CUSTOM&cyclone_id=UPLOAD&timestamp={uid}_b&type=interpolated&format=png",
-            "image_data": _png_to_b64(output_png_path),
-            "diff_data": _png_to_b64(output_diff_path),
-            "image_a_data": _png_to_b64(output_png_a_path),
-            "image_b_data": _png_to_b64(output_png_b_path),
+            "image_data": None,
+            "diff_data": None,
+            "image_a_data": None,
+            "image_b_data": None,
         }
         
     except Exception as e:
